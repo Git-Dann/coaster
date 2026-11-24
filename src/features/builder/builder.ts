@@ -314,5 +314,5 @@ export function planDragToPiece(cursor: { p: V3; dir: V3 }, point: V3): { length
   theta = Math.max(-Math.PI, Math.min(Math.PI, theta));
   const half = Math.abs(theta) / 2;
   const length = half > 1e-3 ? (chord * half) / Math.sin(half) : chord;
-  return { length: Math.max(4, Math.min(80, Math.round(length))), turn: Math.round(theta / DEG / 5) * 5 };
+  return { length: Math.max(4, Math.min(80, Math.round(length))), turn: Math.round(theta / DEG / 5) * 5 + 0 };
 }

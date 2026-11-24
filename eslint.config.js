@@ -3,7 +3,7 @@ import tseslint from 'typescript-eslint';
 import reactHooks from 'eslint-plugin-react-hooks';
 
 export default tseslint.config(
-  { ignores: ['dist', 'node_modules', 'playwright-report', 'test-results', 'public/sw.js'] },
+  { ignores: ['dist', 'node_modules', 'playwright-report', 'test-results', 'public/sw.js', 'scripts/*.cjs'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
@@ -15,5 +15,10 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       'no-console': ['warn', { allow: ['warn', 'error', 'info'] }],
     },
+  },
+  {
+    // End-to-end tests poke the debug hook on window; typing it fully adds noise without safety.
+    files: ['e2e/**/*.ts'],
+    rules: { '@typescript-eslint/no-explicit-any': 'off' },
   },
 );

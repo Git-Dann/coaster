@@ -439,9 +439,11 @@ export class Engine {
     if (this.design && this.design.nodes.length <= 3 && !this.design.closed) {
       // A fresh coaster: look at the open end where building happens.
       const end = this.design.nodes[this.design.nodes.length - 1]!;
-      this.rig.focusOn(new THREE.Vector3(end.p[0] + 6, end.p[1] + 3, end.p[2] - 4), 42);
-      this.rig.yaw = -0.35;
-      this.rig.pitch = 0.32;
+      // Aim a little below the end so the handles sit in the upper-middle, clear of the build sheet.
+      const portrait = this.canvas.clientWidth < this.canvas.clientHeight;
+      this.rig.focusOn(new THREE.Vector3(end.p[0], end.p[1] - (portrait ? 11 : 4), end.p[2]), portrait ? 48 : 40);
+      this.rig.yaw = -0.9;
+      this.rig.pitch = 0.36;
       return;
     }
     const box = new THREE.Box3();

@@ -216,7 +216,11 @@ export class TerrainManager {
         const key = `${cx},${cz}`;
         wanted.add(key);
         const have = this.chunks.get(key);
-        if (!have || have.lod !== lod || this.dirty.has(key) || have.rev !== this.rev) this.request(cx, cz, lod, d + lod * 40 + (have ? 200 : 0));
+        if (!have || have.lod !== lod || this.dirty.has(key) || have.rev !== this.rev) {
+          // Missing chunks first, then stale content (world/edits changed), then LOD refinements.
+          const penalty = !have ? 0 : have.rev !== this.rev ? 60 : 200;
+          this.request(cx, cz, lod, d + lod * 40 + penalty);
+        }
       }
     }
     this.dirty.clear();
