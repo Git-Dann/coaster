@@ -38,51 +38,42 @@ function Modal(props: { title: string; onClose: () => void; children: ReactNode;
 }
 
 export function Welcome() {
+  const returning = useGame((s) => s.returning);
+  const name = useGame((s) => s.coasterName);
   const close = () => useGame.setState({ overlay: 'none' });
   const g = useGame.getState;
   return (
-    <div className="cc-welcome" role="dialog" aria-label="Welcome to Cozy Coaster">
-      <h1>Cozy Coaster</h1>
-      <p>Build at your own pace. There's nothing to win and nowhere to be.</p>
-      <div className="cc-welcome-actions">
-        <Button
-          variant="accent"
-          icon="play"
-          wide
-          onClick={() => {
-            void services.engine?.audio.unlock();
-            close();
-          }}
-        >
-          Continue
-        </Button>
-        <Button
-          icon="build"
-          wide
-          onClick={() => {
-            void services.engine?.audio.unlock();
-            g().newWorld({ blank: true });
-            useGame.setState({ overlay: 'none', panel: 'build', previewActive: true, preset: 'track' });
-            g().toast('Drag the ring at the end of the track to steer, and the arrow to raise it. Tap Place when it looks right.');
-          }}
-        >
-          Create a new coaster
-        </Button>
-        <Button
-          icon="ride"
-          wide
-          onClick={() => {
-            void services.engine?.audio.unlock();
-            useGame.setState({ overlay: 'none', panel: 'ride', camera: 'front' });
-            services.engine?.dispatch();
-          }}
-        >
-          Take a ride
-        </Button>
+    <div className="cc-welcome-wrap">
+      <div className="cc-welcome" role="dialog" aria-label="Welcome to Cozy Coaster">
+        <h1>Cozy Coaster</h1>
+        <p>{returning ? `Welcome back. ${name} is just as you left it.` : "Build at your own pace. There's nothing to win and nowhere to be."}</p>
+        <div className="cc-welcome-actions">
+          <Button variant="accent" icon="play" wide onClick={close}>
+            {returning ? 'Continue' : 'Explore the meadow'}
+          </Button>
+          <Button
+            icon="build"
+            wide
+            onClick={() => {
+              g().newWorld({ blank: true });
+              useGame.setState({ overlay: 'none', panel: 'build', previewActive: true, preset: 'track', sheetCompact: false });
+              g().toast('Drag the ring at the end of the track to steer, and the arrow to raise it. Tap Place when it looks right.');
+            }}
+          >
+            {returning ? 'Start a new coaster' : 'Build your own coaster'}
+          </Button>
+          <Button
+            icon="ride"
+            wide
+            onClick={() => {
+              useGame.setState({ overlay: 'none', panel: 'ride', camera: 'front', sheetCompact: true });
+              services.engine?.dispatch();
+            }}
+          >
+            Take a ride
+          </Button>
+        </div>
       </div>
-      <button className="cc-link" onClick={close}>
-        Skip
-      </button>
     </div>
   );
 }

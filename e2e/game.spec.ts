@@ -32,7 +32,7 @@ test('launches straight into the world with a working starter coaster', async ({
   await page.goto('/');
   await ready(page);
   await expect(page.getByRole('dialog', { name: 'Welcome to Cozy Coaster' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Continue' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Explore the meadow' })).toBeVisible();
   // The canvas is not blank: sample pixel variance.
   const variance = await page.evaluate(() => {
     const e = (window as any).__cozy.engine;
@@ -52,7 +52,7 @@ test('launches straight into the world with a working starter coaster', async ({
 test('build: raise the track end, watch supports grow, place, undo and redo', async ({ page }) => {
   await page.goto('/');
   await ready(page);
-  await page.getByRole('button', { name: 'Create a new coaster' }).click();
+  await page.getByRole('button', { name: 'Build your own coaster' }).click();
   const start = await page.evaluate(() => (window as any).__cozy.store.getState().design.nodes.length);
   const project = () =>
     page.evaluate(() => {
@@ -105,7 +105,7 @@ test('build: raise the track end, watch supports grow, place, undo and redo', as
 test('a two-finger pinch moves the camera and never places track', async ({ page }) => {
   await page.goto('/');
   await ready(page);
-  await page.getByRole('button', { name: 'Create a new coaster' }).click();
+  await page.getByRole('button', { name: 'Build your own coaster' }).click();
   await page.waitForTimeout(1500);
   const before = await page.evaluate(() => ({ n: (window as any).__cozy.store.getState().design.nodes.length, d: (window as any).__cozy.engine.rig.distance }));
   // Synthesise a pinch with two pointers on the canvas.
@@ -135,7 +135,7 @@ test('a two-finger pinch moves the camera and never places track', async ({ page
 test('six carriages, timber supports, gentle rain and a ride', async ({ page }) => {
   await page.goto('/');
   await ready(page);
-  await page.getByRole('button', { name: 'Skip' }).click();
+  await page.getByRole('button', { name: 'Explore the meadow' }).click();
   await page.getByRole('button', { name: 'Train', exact: true }).click();
   const more = page.getByRole('button', { name: 'More carriages' });
   while (await more.isEnabled()) await more.click();
@@ -158,7 +158,7 @@ test('six carriages, timber supports, gentle rain and a ride', async ({ page }) 
 test('progress saves automatically and survives a reload', async ({ page }) => {
   await page.goto('/');
   await ready(page);
-  await page.getByRole('button', { name: 'Skip' }).click();
+  await page.getByRole('button', { name: 'Explore the meadow' }).click();
   await page.getByRole('button', { name: 'Style', exact: true }).click();
   const name = page.getByLabel('Coaster name');
   await name.fill('Willow Whirl');
@@ -171,7 +171,7 @@ test('progress saves automatically and survives a reload', async ({ page }) => {
 test('recovers from WebGL context loss without losing the world', async ({ page }) => {
   await page.goto('/');
   await ready(page);
-  await page.getByRole('button', { name: 'Skip' }).click();
+  await page.getByRole('button', { name: 'Explore the meadow' }).click();
   const nodes = await page.evaluate(() => (window as any).__cozy.store.getState().design.nodes.length);
   await page.evaluate(async () => {
     const gl = (window as any).__cozy.engine.renderer.getContext() as WebGL2RenderingContext;
@@ -189,7 +189,7 @@ test('seeded visual scenes render without errors', async ({ page }) => {
   test.setTimeout(360_000);
   await page.goto('/');
   await ready(page, true);
-  await page.getByRole('button', { name: 'Skip' }).click();
+  await page.getByRole('button', { name: 'Explore the meadow' }).click();
   const scenes: Array<[string, Record<string, unknown>, Record<string, unknown>?]> = [
     ['woodland-timber', { biome: 'woodland', weather: 'mist', time: 'morning' }, { style: 'wood', supportStyle: 'walnut' }],
     ['alpine-steel', { biome: 'alpine', weather: 'clear', time: 'midday' }, { style: 'boxspine', supportStyle: 'galvanised' }],

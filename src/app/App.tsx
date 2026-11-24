@@ -4,6 +4,7 @@ import { useGame } from '../stores/game';
 import { connectStore, engineCallbacks, placePreview, cancelConnect } from './bridge';
 import { services, ui } from './services';
 import { saves, watchForSaves } from './persistence';
+import { installAudioUnlock } from './audio-unlock';
 import { BottomNav, Diagnostics, Hint, Telemetry, Toasts, TopBar } from '../components/Hud';
 import { BuildPanel, RidePanel, SceneryPanel, StylePanel, TrainPanel, WeatherPanel } from '../components/Panels';
 import { Compatibility, PhotoMode, RelaxOverlay, SavesDialog, SettingsDialog, Welcome } from '../components/Dialogs';
@@ -31,6 +32,7 @@ export function App() {
     let engine: Engine;
     let disposeStore = () => {};
     let disposeSaves = () => {};
+    let disposeAudio = () => {};
     let cancelled = false;
     const boot = async () => {
       await saves.init();
@@ -50,6 +52,7 @@ export function App() {
       engine.setEnvironment(s.env);
       disposeStore = connectStore(engine);
       disposeSaves = watchForSaves();
+      disposeAudio = installAudioUnlock();
       engine.start();
       setReady(true);
     };
@@ -61,6 +64,7 @@ export function App() {
       ro.disconnect();
       disposeStore();
       disposeSaves();
+      disposeAudio();
       services.engine?.dispose();
       services.engine = null;
     };

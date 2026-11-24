@@ -612,3 +612,244 @@
     top: calc(var(--safe-top) + 68px);
   }
 }
+
+/* =====================================================================
+   Polish pass: paper surfaces, grouped controls, sliding nav, grab handles
+   ===================================================================== */
+:root {
+  --paper-tex: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.46 0 0 0 0 0.36 0 0 0 0 0.28 0 0 0 0.09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  --surface: rgba(250, 245, 236, 0.95);
+  --edge: rgba(118, 91, 72, 0.14);
+}
+.cc-title,
+.cc-pill-group,
+.cc-nav,
+.cc-sheet,
+.cc-modal,
+.cc-welcome,
+.cc-hint,
+.cc-photo {
+  background-color: var(--surface);
+  background-image: var(--paper-tex);
+  border: 1px solid var(--edge);
+}
+
+/* Top bar */
+.cc-top {
+  align-items: center;
+}
+.cc-title {
+  min-height: 44px;
+  padding: 0 var(--s4) 0 var(--s4);
+  box-shadow: var(--e1);
+  font-size: 1rem;
+  letter-spacing: -0.01em;
+}
+.cc-top-right {
+  flex-wrap: nowrap;
+  gap: var(--s2);
+}
+.cc-pill-group {
+  display: flex;
+  align-items: center;
+  border-radius: var(--r-pill);
+  box-shadow: var(--e1);
+  padding: 2px;
+}
+.cc-pill-group .cc-icon-btn {
+  width: 42px;
+  height: 42px;
+}
+.cc-pill-group .cc-narrow-hide {
+  display: contents;
+}
+
+/* Bottom navigation with a sliding highlight */
+.cc-nav {
+  position: relative;
+  border-radius: 26px;
+  padding: 5px;
+  box-shadow: var(--e2);
+}
+.cc-nav-indicator {
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  left: 5px;
+  width: calc((100% - 10px) / var(--n));
+  border-radius: 21px;
+  background: var(--charcoal);
+  transform: translateX(calc(var(--i) * 100%));
+  transition:
+    transform var(--t-slow) var(--ease-spring),
+    opacity var(--t-med);
+  box-shadow: 0 2px 6px rgba(52, 60, 55, 0.25);
+}
+.cc-nav-indicator.hidden {
+  opacity: 0;
+}
+.cc-nav-btn {
+  position: relative;
+  z-index: 1;
+  background: transparent !important;
+  min-height: 54px;
+  font-size: 0.72rem;
+  letter-spacing: 0.01em;
+}
+.cc-nav-btn.on {
+  color: var(--cream);
+}
+
+/* Sheets */
+.cc-sheet {
+  border-radius: 26px;
+  box-shadow: var(--e3);
+  overflow: hidden;
+}
+.cc-sheet-handle {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 22px;
+  border: none;
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+  padding: 0;
+}
+.cc-sheet-handle span {
+  width: 42px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(52, 60, 55, 0.22);
+}
+.cc-sheet-head {
+  padding: 0 var(--s2) 0 var(--s4);
+}
+.cc-sheet-head h2 {
+  font-size: 1.15rem;
+  letter-spacing: -0.01em;
+}
+.cc-sheet-compact {
+  padding: 0 var(--s4) var(--s2);
+  display: grid;
+  gap: 4px;
+}
+.cc-compact-hint {
+  margin: 0;
+}
+.cc-sheet.compact .cc-sheet-head h2 {
+  font-size: 1rem;
+}
+.cc-sheet-actions {
+  border-top: 1px solid var(--edge);
+}
+
+/* Tiles and chips */
+.cc-tiles button,
+.cc-chip {
+  background: rgba(255, 252, 246, 0.7);
+  border: 1.5px solid var(--edge);
+  color: var(--ink);
+  transition:
+    transform var(--t-fast) var(--ease-out),
+    border-color var(--t-fast),
+    background var(--t-fast);
+}
+.cc-tiles button {
+  min-height: 60px;
+  border-radius: 16px;
+}
+.cc-tiles button svg,
+.cc-chip svg {
+  color: var(--forest);
+}
+.cc-tiles button.on,
+.cc-chip.on {
+  background: #fff8ee;
+  border-color: var(--charcoal);
+  box-shadow: inset 0 0 0 1px var(--charcoal);
+}
+.cc-tiles button.on svg,
+.cc-chip.on svg {
+  color: var(--terracotta);
+}
+.cc-seg {
+  background: rgba(230, 215, 193, 0.55);
+}
+
+/* Centred overlays without transforms, so entrance animations never slide sideways */
+.cc-welcome-wrap {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  padding: 0 16px calc(var(--safe-bottom) + 96px);
+  pointer-events: none;
+  z-index: 10;
+}
+.cc-welcome {
+  position: relative;
+  left: auto;
+  bottom: auto;
+  transform: none;
+  pointer-events: auto;
+  border-radius: 26px;
+  animation: cc-pop var(--t-slow) var(--ease-out);
+}
+@keyframes cc-pop {
+  from {
+    transform: translateY(14px) scale(0.98);
+    opacity: 0;
+  }
+}
+.cc-hint,
+.cc-toasts {
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  transform: none;
+}
+.cc-hint {
+  width: fit-content;
+}
+.cc-photo {
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  transform: none;
+}
+.cc-toast {
+  border-radius: 18px;
+}
+
+@media (max-height: 520px) and (orientation: landscape) {
+  .cc-welcome-wrap {
+    padding-bottom: calc(var(--safe-bottom) + 64px);
+  }
+}
+@media (max-width: 520px) {
+  .cc-pill-group .cc-narrow-hide {
+    display: none;
+  }
+}
+
+/* Phones: icon-only navigation (labels stay as accessible names and tooltips). */
+@media (max-width: 520px) {
+  .cc-nav-label {
+    display: none;
+  }
+  .cc-nav-btn {
+    min-height: 52px;
+  }
+  .cc-nav-indicator {
+    top: 7px;
+    bottom: 7px;
+    left: calc(5px + (100% - 10px) / var(--n) * 0.14);
+    width: calc((100% - 10px) / var(--n) * 0.72);
+    border-radius: 18px;
+    /* Translate by whole slots: the pill is 72 % of a slot wide. */
+    transform: translateX(calc(var(--i) * 100% / 0.72));
+  }
+}

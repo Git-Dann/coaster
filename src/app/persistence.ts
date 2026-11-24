@@ -47,6 +47,7 @@ export const saves = {
       const r = await this.store.load(id);
       if (r.ok) {
         useGame.getState().loadSave(r.save);
+        useGame.setState({ returning: true });
         if (r.recovered) {
           useGame.getState().toast('We restored your park from its most recent good copy.');
           void this.store.put(r.save);

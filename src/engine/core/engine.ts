@@ -250,6 +250,8 @@ export class Engine {
 
   start(): void {
     if (this.running) return;
+    // Portrait phones open on a view that fits the whole starter coaster.
+    if (this.canvas.clientWidth < this.canvas.clientHeight) this.frameCoaster();
     this.running = true;
     this.last = performance.now();
     const tick = (t: number) => {
@@ -417,7 +419,8 @@ export class Engine {
     this.vegetation.density = lvl.vegDensity * (g?.vegetation ?? 1);
     this.weather.density = lvl.weather * (g?.weatherDensity ?? 1);
     this.terrain.drawDistance = lvl.drawDistance * (g?.drawDistance ?? 1);
-    this.atmosphere.baseFog = 1.45 / this.terrain.drawDistance;
+    // Keep atmospheric haze gentle even when a lower tier shortens the draw distance.
+    this.atmosphere.baseFog = 1.25 / Math.max(this.terrain.drawDistance, 620);
     this.painterly.enabled = g?.postProcessing ?? true;
     this.painterly.apply(PAINTERLY_BY_LEVEL[this.quality.level]!);
     this.applyPixelRatio();
@@ -467,7 +470,13 @@ export class Engine {
     for (let i = 0; i < t.count; i += 8) box.expandByPoint(this.tmp.set(t.pos[i * 3]!, t.pos[i * 3 + 1]!, t.pos[i * 3 + 2]!));
     const c = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3()).length();
-    this.rig.focusOn(c, Math.max(30, size * 0.85));
+    // Narrow (portrait) screens need to stand further back to fit the coaster's width.
+    const aspect = this.canvas.clientWidth / Math.max(1, this.canvas.clientHeight);
+    if (aspect < 1) {
+      // Portrait: look down a little more steeply so the coaster's length fits the tall screen.
+      this.rig.pitch = 0.62;
+      this.rig.focusOn(c.add(new THREE.Vector3(0, -6, 0)), Math.max(30, size * 0.85 * 1.15));
+    } else this.rig.focusOn(c, Math.max(30, size * 0.85));
   }
 
   // ---------------------------------------------------------------- picking
@@ -707,7 +716,7 @@ export class Engine {
     // Audio.
     this.updateAudio(dt, supportsMoving);
 
-    this.painterly.render(this.renderer, this.scene, cam, this.elapsed, this.atmosphere.horizon, this.terrain.drawDistance);
+    this.painterly.render(this.renderer, this.scene, cam, this.elapsed, this.atmosphere.horizon, Math.max(this.terrain.drawDistance, 650));
 
     // Performance bookkeeping.
     this.cpuMs = performance.now() - t0;

@@ -59,6 +59,10 @@ export interface GameState {
   previewSession: string;
   hint: string | null;
   connecting: boolean;
+  /** True when a previous park was restored on launch (welcome says Continue). */
+  returning: boolean;
+  /** Bottom sheet minimised to a compact strip so the world stays reachable. */
+  sheetCompact: boolean;
   selectedNode: string | null;
   sceneryTool: SceneryType | null;
   brush: TerrainBrush | null;
@@ -133,6 +137,8 @@ export const useGame = create<GameState & GameActions>()((set, get) => ({
   previewSession: 'p0',
   hint: null,
   connecting: false,
+  returning: false,
+  sheetCompact: false,
   selectedNode: null,
   sceneryTool: null,
   brush: null,

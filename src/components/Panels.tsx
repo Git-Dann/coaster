@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { useGame } from '../stores/game';
 import { Button, IconButton, Segmented, Slider, Stepper, Swatches, Tiles, Toggle } from '../design-system/controls';
 import { Icon } from '../design-system/Icon';
@@ -11,16 +11,67 @@ import { BIOMES, type Biome, type SceneryType, type TerrainBrush, type TimeOfDay
 import type { CameraMode } from '../engine/camera/camera-rig';
 import { autoGarden } from '../features/scenery/garden';
 
-function Sheet(props: { title: string; children: ReactNode; actions?: ReactNode }) {
+/**
+ * Bottom sheet with a grab handle. Swipe down or tap the handle to minimise it to a compact strip
+ * (so the world stays reachable while placing things); swipe up or tap again to expand.
+ */
+function Sheet(props: { title: string; children: ReactNode; actions?: ReactNode; compact?: ReactNode }) {
+  const compact = useGame((s) => s.sheetCompact);
+  const start = useRef<number | null>(null);
+  const set = (v: boolean) => {
+    if (v === compact) return;
+    ui(v ? 'close' : 'open');
+    useGame.setState({ sheetCompact: v });
+  };
   return (
-    <section className="cc-sheet" aria-label={props.title}>
+    <section className={`cc-sheet${compact ? ' compact' : ''}`} aria-label={props.title}>
+      <button
+        type="button"
+        className="cc-sheet-handle"
+        aria-label={compact ? `Expand ${props.title} panel` : `Minimise ${props.title} panel`}
+        aria-expanded={!compact}
+        onPointerDown={(e) => (start.current = e.clientY)}
+        onPointerUp={(e) => {
+          const dy = start.current === null ? 0 : e.clientY - start.current;
+          start.current = null;
+          if (dy > 20) set(true);
+          else if (dy < -20) set(false);
+          else set(!compact);
+        }}
+      >
+        <span />
+      </button>
       <header className="cc-sheet-head">
         <h2>{props.title}</h2>
-        <IconButton icon="close" label="Close panel" onClick={() => useGame.setState({ panel: 'none', previewActive: false, selectedNode: null })} />
+        <IconButton icon="close" label="Close panel" onClick={() => useGame.setState({ panel: 'none', previewActive: false, selectedNode: null, sheetCompact: false })} />
       </header>
-      <div className="cc-sheet-body">{props.children}</div>
+      {compact ? props.compact && <div className="cc-sheet-compact">{props.compact}</div> : <div className="cc-sheet-body">{props.children}</div>}
       {props.actions && <footer className="cc-sheet-actions">{props.actions}</footer>}
     </section>
+  );
+}
+
+/** Horizontally scrolling chip picker used in compact sheets. */
+function Chips<T extends string>(props: { label: string; value: T | null; options: Array<{ value: T; label: string; icon?: string }>; onChange: (v: T) => void }) {
+  return (
+    <div className="cc-chips" role="radiogroup" aria-label={props.label}>
+      {props.options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          role="radio"
+          aria-checked={o.value === props.value}
+          className={`cc-chip${o.value === props.value ? ' on' : ''}`}
+          onClick={() => {
+            ui('select');
+            props.onChange(o.value);
+          }}
+        >
+          {o.icon && <Icon name={o.icon} size={18} />}
+          {o.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -111,9 +162,11 @@ export function BuildPanel() {
 
   const p = presetById(preset);
   const shown = simplified && !precise ? p.params.slice(0, 2) : p.params;
+  const presetChips = <Chips label="Pieces" value={preset} options={PRESETS.map((pr) => ({ value: pr.id, label: pr.label, icon: PRESET_ICON[pr.id] }))} onChange={(v) => g().setPreset(v)} />;
   return (
     <Sheet
       title="Build"
+      compact={presetChips}
       actions={
         <>
           <IconButton icon="trash" label="Remove last piece" onClick={removeLast} />
@@ -314,8 +367,17 @@ export function SceneryPanel() {
   const radius = useGame((s) => s.brushRadius);
   const strength = useGame((s) => s.brushStrength);
   const count = useGame((s) => s.scenery.length);
+  // Picking something to place minimises the sheet so the ground is free to tap.
+  const pickTool = (v: SceneryType) => useGame.setState({ sceneryTool: tool === v ? null : v, sheetCompact: tool !== v });
+  const pickBrush = (v: TerrainBrush) => useGame.setState({ brush: v, sheetCompact: true });
+  const compact = (
+    <>
+      {brush ? <Chips label="Landscape brush" value={brush} options={BRUSHES} onChange={pickBrush} /> : <Chips label="Scenery item" value={tool} options={SCENERY} onChange={pickTool} />}
+      <p className="cc-p small cc-compact-hint">{brush ? 'Drag across the ground to sculpt. Two fingers move the camera.' : tool ? 'Tap the ground to place. Tap the chip again to remove things instead.' : 'Tap something you placed to remove it.'}</p>
+    </>
+  );
   return (
-    <Sheet title="Scenery">
+    <Sheet title="Scenery" compact={compact}>
       <Segmented
         label="Mode"
         value={brush ? 'terrain' : 'place'}
@@ -323,12 +385,12 @@ export function SceneryPanel() {
           { value: 'place', label: 'Place' },
           { value: 'terrain', label: 'Landscape' },
         ]}
-        onChange={(v) => useGame.setState(v === 'terrain' ? { brush: 'raise', sceneryTool: null } : { brush: null, sceneryTool: 'oak' })}
+        onChange={(v) => useGame.setState(v === 'terrain' ? { brush: 'raise', sceneryTool: null } : { brush: null, sceneryTool: null })}
       />
       {!brush ? (
         <>
-          <Tiles label="Scenery item" value={tool} columns={4} options={SCENERY} onChange={(v) => useGame.setState({ sceneryTool: tool === v ? null : v })} />
-          <p className="cc-p small">{tool ? 'Tap the ground to place. Tap the tile again to switch to removing.' : 'Tap an item in the world to remove it.'} {count > 0 && `${count} placed.`}</p>
+          <Tiles label="Scenery item" value={tool} columns={4} options={SCENERY} onChange={pickTool} />
+          <p className="cc-p small">Pick something, then tap the ground to place it. With nothing picked, tapping removes. {count > 0 && `${count} placed.`}</p>
           <Button
             icon="sparkle"
             onClick={() => {
@@ -343,7 +405,7 @@ export function SceneryPanel() {
         </>
       ) : (
         <>
-          <Tiles label="Landscape brush" value={brush} columns={3} options={BRUSHES} onChange={(v) => useGame.setState({ brush: v })} />
+          <Tiles label="Landscape brush" value={brush} columns={3} options={BRUSHES} onChange={pickBrush} />
           <Slider label="Brush size" value={radius} min={3} max={30} step={1} unit=" m" onChange={(v) => useGame.setState({ brushRadius: v })} />
           <Slider label="Strength" value={strength} min={0.2} max={2} step={0.1} onChange={(v) => useGame.setState({ brushStrength: v })} />
           <p className="cc-p small">Drag across the ground to sculpt. Two fingers still move the camera. Supports re-anchor automatically.</p>
@@ -436,6 +498,7 @@ export function RidePanel() {
   return (
     <Sheet
       title="Ride"
+      compact={<Chips label="Camera" value={camera} options={CAMS} onChange={(v) => useGame.setState({ camera: v })} />}
       actions={
         <>
           <IconButton icon="reset" label="Back to station" onClick={() => services.engine?.resetTrain()} />
