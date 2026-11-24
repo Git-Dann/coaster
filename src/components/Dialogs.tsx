@@ -149,6 +149,7 @@ export function SettingsDialog() {
               ]}
               onChange={(v) => set((x) => ({ ...x, graphics: { ...x.graphics, fpsCap: Number(v) as 0 | 30 | 60 } }))}
             />
+            <Toggle label="Watercolour painting" hint="The painted look. Turn off for maximum speed on older devices." checked={s.graphics.postProcessing} onChange={(v) => set((x) => ({ ...x, graphics: { ...x.graphics, postProcessing: v } }))} />
             <Toggle label="Developer diagnostics" checked={s.showDiagnostics} onChange={(v) => set((x) => ({ ...x, showDiagnostics: v }))} />
           </>
         )}
