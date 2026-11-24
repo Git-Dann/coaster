@@ -65,7 +65,7 @@ Counts are hardware-independent; frame times are **not** meaningful on a softwar
 
 ## Watercolour pass cost
 
-The painterly pass is a full-screen filter; its Kuwahara step is the costly part (taps grow with radius²). On real GPUs this is a small fraction of a frame at radius 2–3, but on CPU software rendering (SwiftShader, used in CI) it roughly halves the frame rate. Battery tier disables Kuwahara and Settings → Graphics → Watercolour painting turns the whole pass off. Functional browser tests run at Battery with painting off for that reason; the visual-scenes test keeps the full look. Mobile GPU cost has **not** been measured.
+The painterly pass is a full-screen filter; its Kuwahara step is the costly part (taps grow with radius²). It is expected to be modest on real GPUs at radius 2–3 (not yet measured); on CPU software rendering (SwiftShader, used in CI) it roughly halves the frame rate. Battery tier disables Kuwahara and Settings → Graphics → Watercolour painting turns the whole pass off. Functional browser tests run at Battery with painting off for that reason; the visual-scenes test keeps the full look. Mobile GPU cost has **not** been measured.
 
 ## Not yet done
 
