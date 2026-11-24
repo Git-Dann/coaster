@@ -1,9 +1,19 @@
 import { expect, test, type Page } from '@playwright/test';
 
+/**
+ * Functional tests run at the cheapest graphics tier: CI renders on a CPU (SwiftShader), where the
+ * full watercolour pass drops to ~2 FPS and the bounded fixed-step loop slows simulation time.
+ * The visual scenes test keeps the full look.
+ */
+async function fast(page: Page) {
+  await page.evaluate(() => (window as any).__cozy.store.getState().setSettings((s: any) => ({ ...s, graphics: { ...s.graphics, tier: 'battery', postProcessing: false } })));
+}
+
 /** Wait until the engine exists and terrain around the camera has streamed in. */
-async function ready(page: Page) {
+async function ready(page: Page, full = false) {
   await page.waitForFunction(() => !!(window as unknown as { __cozy?: unknown }).__cozy, null, { timeout: 45_000 });
   await page.waitForFunction(() => (window as unknown as { __cozy: { engine: { terrain: { chunks: Map<string, unknown> } } } }).__cozy.engine.terrain.chunks.size > 8, null, { timeout: 45_000 });
+  if (!full) await fast(page);
 }
 
 const errors: string[] = [];
@@ -176,9 +186,9 @@ test('recovers from WebGL context loss without losing the world', async ({ page 
 });
 
 test('seeded visual scenes render without errors', async ({ page }) => {
-  test.setTimeout(240_000);
+  test.setTimeout(360_000);
   await page.goto('/');
-  await ready(page);
+  await ready(page, true);
   await page.getByRole('button', { name: 'Skip' }).click();
   const scenes: Array<[string, Record<string, unknown>, Record<string, unknown>?]> = [
     ['woodland-timber', { biome: 'woodland', weather: 'mist', time: 'morning' }, { style: 'wood', supportStyle: 'walnut' }],

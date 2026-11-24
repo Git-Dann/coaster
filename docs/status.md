@@ -53,6 +53,7 @@ Last updated 2026-11-24. This is an honest account of what is done, what is part
 
 - Ride physics follows the track centre line, not the heartline; couplings are rigid; no static friction. See `docs/physics.md`.
 - Inverted and near-vertical sections have no ground supports.
+- Flex is not applied to shadow maps (shadows stay rigid; the difference is millimetres to centimetres).
 - Removing a piece removes the last node, not the whole last element.
 - Biome changes regenerate distant chunks over a few seconds; far terrain briefly shows the previous biome.
 - Audio is untuned; the (Not Boring) Sound Kit is not used (licence unverified).

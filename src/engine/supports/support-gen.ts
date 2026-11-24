@@ -15,6 +15,19 @@ export interface Member {
   r: number;
 }
 
+type P3 = [number, number, number];
+const TIER = 2.4;
+
+interface Bent {
+  id: string;
+  s: number;
+  posts: number;
+  at: (post: number, y: number) => P3;
+  levels: number[];
+  top: number;
+  base: number;
+}
+
 export const TIMBER_STYLES: ReadonlySet<SupportStyle> = new Set(['pine', 'walnut', 'painted-timber', 'weathered']);
 
 type Ground = (x: number, z: number) => number;
@@ -63,10 +76,11 @@ class TrackHash {
  */
 export function generateSupports(design: Pick<TrackDesign, 'nodes' | 'closed' | 'supportStyle'>, track: BakedTrack, ground: Ground): Member[] {
   const timber = TIMBER_STYLES.has(design.supportStyle);
-  const span = timber ? 3.4 : 6.5;
+  const span = timber ? 2.4 : 6.5;
   const out: Member[] = [];
   const smp = newSample();
   const hash = new TrackHash(track);
+  const bents: Bent[] = [];
   const segs = track.closed ? track.nodeS.length : track.nodeS.length - 1;
   for (let si = 0; si < segs; si++) {
     const s0 = track.nodeS[si]!;
@@ -83,7 +97,7 @@ export function generateSupports(design: Pick<TrackDesign, 'nodes' | 'closed' | 
       const gz = smp.pos[2];
       const gy = ground(gx, gz);
       // Attach under the spine, along the track's down vector.
-      const drop = timber ? 0.32 : 0.62;
+      const drop = timber ? 0.5 : 0.62;
       const ax = smp.pos[0] - smp.up[0] * drop;
       const ay = smp.pos[1] - smp.up[1] * drop;
       const az = smp.pos[2] - smp.up[2] * drop;
@@ -99,30 +113,42 @@ export function generateSupports(design: Pick<TrackDesign, 'nodes' | 'closed' | 
       rx /= rl;
       rz /= rl;
       if (timber) {
-        const half = 0.75 + height * 0.07;
-        const posts: Array<[number, number, number]> = [-1, 1].map((sgn) => [ax + rx * half * sgn, ground(ax + rx * half * sgn, az + rz * half * sgn), az + rz * half * sgn]);
-        for (const p of posts) {
-          push('pad', [p[0], p[1] - 0.25, p[2]], [p[0], p[1] + 0.12, p[2]], 0.28);
-          push('beam', p, [p[0], ay, p[2]], 0.09);
+        // A traditional bent: vertical posts under the rails, battered outer posts on taller
+        // bents, ledgers on every tier and X-bracing between neighbouring posts.
+        const offsets = height > 6 ? [-(1.25 + height * 0.09), -0.72, 0.72, 1.25 + height * 0.09] : [-0.9, 0.9];
+        const topOffsets = height > 6 ? [-1.25, -0.72, 0.72, 1.25] : [-0.9, 0.9];
+        const posts: P3[] = offsets.map((o) => {
+          const x = ax + rx * o;
+          const z = az + rz * o;
+          return [x, ground(x, z), z];
+        });
+        const tops: P3[] = topOffsets.map((o) => [ax + rx * o, ay, az + rz * o]);
+        const lerpPost = (i: number, y: number): P3 => {
+          const b = posts[i]!;
+          const t = tops[i]!;
+          const k = (y - b[1]) / Math.max(0.01, t[1] - b[1]);
+          return [b[0] + (t[0] - b[0]) * k, y, b[2] + (t[2] - b[2]) * k];
+        };
+        posts.forEach((p, i) => {
+          push('pad', [p[0], p[1] - 0.3, p[2]], [p[0], p[1] + 0.15, p[2]], 0.26);
+          push('beam', p, tops[i]!, 0.09);
+        });
+        // Cap ledger carrying the track.
+        push('beam', tops[0]!, tops[tops.length - 1]!, 0.1);
+        // Tiers at absolute heights so neighbouring bents line up for longitudinal bracing.
+        const base = Math.max(...posts.map((p) => p[1]));
+        const levels: number[] = [];
+        for (let y = Math.ceil((base + 0.6) / TIER) * TIER; y < ay - 0.8; y += TIER) levels.push(y);
+        let prev = base + 0.25;
+        for (const y of [...levels, ay]) {
+          if (y !== ay) push('beam', lerpPost(0, y), lerpPost(posts.length - 1, y), 0.055);
+          for (let i = 0; i + 1 < posts.length; i++) {
+            push('beam', lerpPost(i, prev), lerpPost(i + 1, y), 0.035);
+            push('beam', lerpPost(i + 1, prev), lerpPost(i, y), 0.035);
+          }
+          prev = y;
         }
-        // Cap ledger under the track.
-        push('beam', [posts[0]![0], ay, posts[0]![2]], [posts[1]![0], ay, posts[1]![2]], 0.1);
-        // Tiers with X-bracing.
-        const tier = 3;
-        const base = Math.max(posts[0]![1], posts[1]![1]);
-        let y = base + tier;
-        let prevY = base + 0.3;
-        while (y < ay - 0.6) {
-          push('beam', [posts[0]![0], y, posts[0]![2]], [posts[1]![0], y, posts[1]![2]], 0.07);
-          push('beam', [posts[0]![0], prevY, posts[0]![2]], [posts[1]![0], y, posts[1]![2]], 0.05);
-          push('beam', [posts[1]![0], prevY, posts[1]![2]], [posts[0]![0], y, posts[0]![2]], 0.05);
-          prevY = y;
-          y += tier;
-        }
-        if (ay - prevY > 1) {
-          push('beam', [posts[0]![0], prevY, posts[0]![2]], [posts[1]![0], ay, posts[1]![2]], 0.05);
-          push('beam', [posts[1]![0], prevY, posts[1]![2]], [posts[0]![0], ay, posts[0]![2]], 0.05);
-        }
+        bents.push({ id, s, posts: posts.length, at: (i, y) => lerpPost(i, y), levels, top: ay, base });
       } else {
         const r = 0.16 + Math.min(0.14, height * 0.006);
         if (height > 14) {
@@ -145,10 +171,43 @@ export function generateSupports(design: Pick<TrackDesign, 'nodes' | 'closed' | 
           push('pad', [ax, gy - 0.3, az], [ax, gy + 0.15, az], r * 2.6);
           push('tube', [ax, gy, az], [ax, ay - 0.1, az], r);
         }
+        // Bolted flange plate where the column meets the spine bracket.
+        push('pad', [ax, ay - 0.2, az], [ax, ay - 0.12, az], r * 1.9);
         // Short arm into the spine (follows banking).
         push('tube', [ax, ay - 0.15, az], [smp.pos[0] - smp.up[0] * 0.42, smp.pos[1] - smp.up[1] * 0.42, smp.pos[2] - smp.up[2] * 0.42], r * 0.75);
       }
     }
   }
+  if (timber) longitudinalBracing(bents, span, track, out);
   return out;
+}
+
+/**
+ * Longitudinal bracing between consecutive bents: stringers along each tier and alternating
+ * diagonals on the outer lines of posts. This is what turns separate frames into the dense,
+ * criss-crossed lattice of a wooden coaster.
+ */
+function longitudinalBracing(bents: Bent[], span: number, track: BakedTrack, out: Member[]): void {
+  for (let b = 0; b + 1 < bents.length; b++) {
+    const A = bents[b]!;
+    const B = bents[b + 1]!;
+    let ds = Math.abs(B.s - A.s);
+    if (track.closed) ds = Math.min(ds, track.length - ds);
+    if (ds > span * 1.7 || A.posts !== B.posts) continue;
+    let mi = 0;
+    const key = `${A.id}>${B.id}`;
+    const push = (a: P3, c: P3, r: number) => out.push({ key: `${key}:${mi++}`, support: key, kind: 'beam', a, b: c, r });
+    const outer = A.posts > 2 ? [0, A.posts - 1] : [0, 1];
+    const shared = A.levels.filter((y) => B.levels.includes(y));
+    for (const i of outer) {
+      push(A.at(i, Math.min(A.top, B.top) - 0.05), B.at(i, Math.min(A.top, B.top) - 0.05), 0.045);
+      for (let k = 0; k < shared.length; k++) {
+        const y = shared[k]!;
+        push(A.at(i, y), B.at(i, y), 0.04);
+        const y2 = shared[k + 1] ?? Math.min(A.top, B.top);
+        if ((b + k) % 2 === 0) push(A.at(i, y), B.at(i, y2), 0.032);
+        else push(B.at(i, y), A.at(i, y2), 0.032);
+      }
+    }
+  }
 }

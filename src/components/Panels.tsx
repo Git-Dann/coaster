@@ -223,6 +223,7 @@ export function TrainPanel() {
   );
 }
 
+const TIMBER_SUPPORTS: ReadonlySet<SupportStyle> = new Set(['pine', 'walnut', 'painted-timber', 'weathered']);
 const TRACK_STYLES: Array<{ value: TrackStyle; label: string }> = [
   { value: 'tubular', label: 'Tubular steel' },
   { value: 'boxspine', label: 'Box spine' },
@@ -250,7 +251,21 @@ export function StylePanel() {
         <span>Coaster name</span>
         <input value={name} maxLength={40} onChange={(e) => useGame.setState({ coasterName: e.target.value })} />
       </label>
-      <Tiles label="Track" value={design.style} columns={2} options={TRACK_STYLES} onChange={(v) => (ui('material'), patch({ style: v }))} />
+      <Tiles
+        label="Track"
+        value={design.style}
+        columns={2}
+        options={TRACK_STYLES}
+        onChange={(v) => {
+          ui('material');
+          // Real coasters pair materials: wooden track rides on timber bents, steel track on steel.
+          // The supports stay overridable afterwards (hybrid coasters exist).
+          const timberNow = TIMBER_SUPPORTS.has(design.supportStyle);
+          if (v === 'wood' && !timberNow) patch({ style: v, supportStyle: 'painted-timber', colours: { ...design.colours, support: '#F2E6D3', spine: '#B08A62', sleeper: '#8C6A4E', rail: '#9AA0A3' } });
+          else if ((v === 'tubular' || v === 'boxspine') && timberNow) patch({ style: v, supportStyle: 'powder-steel', colours: { ...design.colours, support: '#F5EBDD', spine: '#C77D62', rail: '#C77D62', sleeper: '#765B48' } });
+          else patch({ style: v });
+        }}
+      />
       <Tiles
         label="Supports"
         value={design.supportStyle}

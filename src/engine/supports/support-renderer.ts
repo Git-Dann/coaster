@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import type { Member, MemberKind } from './support-gen';
 import { addPaintedVariation, SUPPORT_MATERIALS } from '../renderer/materials';
 import type { SupportStyle } from '../track/types';
+import { injectFlex, type FlexUniforms } from '../physics/flex';
 
 interface Live {
   m: Member;
@@ -15,7 +15,7 @@ interface Live {
   removing: boolean;
 }
 
-const CAP = 12000;
+const CAP = 40000;
 const up = new THREE.Vector3(0, 1, 0);
 const dir = new THREE.Vector3();
 const mid = new THREE.Vector3();
@@ -43,7 +43,8 @@ export class SupportRenderer {
   constructor() {
     this.material = addPaintedVariation(new THREE.MeshStandardMaterial({ color: '#F5EBDD', roughness: 0.6, metalness: 0.1 }), 0.05, 0.6);
     const tube = new THREE.CylinderGeometry(1, 1, 1, 10, 1).translate(0, 0.5, 0);
-    const beam = new RoundedBoxGeometry(2, 1, 2, 1, 0.25).translate(0, 0.5, 0);
+    // Plain boxes: cheap enough for dense timber lattices (the painterly pass softens the edges).
+    const beam = new THREE.BoxGeometry(2, 1, 2).translate(0, 0.5, 0);
     const pad = new THREE.CylinderGeometry(1, 1.08, 1, 12, 1).translate(0, 0.5, 0);
     const mk = (g: THREE.BufferGeometry, name: string) => {
       const m = new THREE.InstancedMesh(g, this.material, CAP);
@@ -58,6 +59,18 @@ export class SupportRenderer {
     this.meshes = { tube: mk(tube, 'support-tubes'), beam: mk(beam, 'support-beams'), pad: mk(pad, 'support-pads') };
     this.meshes.pad.material = new THREE.MeshStandardMaterial({ color: '#CFC7B8', roughness: 0.95 });
     this.group.name = 'supports';
+  }
+
+  /** Supports flex with the structure; footings (separate material) stay planted. */
+  enableFlex(u: FlexUniforms): void {
+    const prev = this.material.onBeforeCompile;
+    const prevKey = this.material.customProgramCacheKey();
+    this.material.onBeforeCompile = (shader, rr) => {
+      prev.call(this.material, shader, rr);
+      injectFlex(shader, u, 1);
+    };
+    this.material.customProgramCacheKey = () => `${prevKey}|flex`;
+    this.material.needsUpdate = true;
   }
 
   setStyle(style: SupportStyle, colour?: string): void {

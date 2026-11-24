@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import type { BakedTrack } from './bake';
 import { buildTrackGeometry, type GeometryBuffers } from './track-geometry';
 import type { TrackColours, TrackStyle } from './types';
+import { injectFlex, type FlexUniforms } from '../physics/flex';
 
 /**
  * Track material: one draw call for rails, spine, sleepers and section details. Each vertex
@@ -77,6 +78,17 @@ export class TrackRenderer {
     this.mesh.receiveShadow = !preview;
     this.mesh.frustumCulled = false;
     this.mesh.name = preview ? 'track-preview' : 'track';
+  }
+
+  /** Let the track bend with the structure (committed track only). */
+  enableFlex(u: FlexUniforms): void {
+    const prev = this.material.onBeforeCompile;
+    this.material.onBeforeCompile = (shader, rr) => {
+      prev.call(this.material, shader, rr);
+      injectFlex(shader, u, 0);
+    };
+    this.material.customProgramCacheKey = () => 'track-flex';
+    this.material.needsUpdate = true;
   }
 
   setColours(c: TrackColours, style: TrackStyle): void {

@@ -63,6 +63,10 @@ Counts are hardware-independent; frame times are **not** meaningful on a softwar
 - Adaptive quality: rolling 120-frame window, p50/p90 with hysteresis (degrade after 2.5 s slow, recover after 10 s of headroom, never auto-climbs to Ultra). Ladder reduces pixel ratio, shadow map size/extent, vegetation radius/density, weather density and draw distance.
 - Developer overlay (Settings → Graphics → Developer diagnostics): FPS, frame-time percentiles, main-thread and sim timing, draw calls, triangles, geometries/textures, chunks, supports, vegetation, worker queue, audio voices, quality tier, pixel ratio and resolution.
 
+## Watercolour pass cost
+
+The painterly pass is a full-screen filter; its Kuwahara step is the costly part (taps grow with radius²). On real GPUs this is a small fraction of a frame at radius 2–3, but on CPU software rendering (SwiftShader, used in CI) it roughly halves the frame rate. Battery tier disables Kuwahara and Settings → Graphics → Watercolour painting turns the whole pass off. Functional browser tests run at Battery with painting off for that reason; the visual-scenes test keeps the full look. Mobile GPU cost has **not** been measured.
+
 ## Not yet done
 
 - Physical device profiling (iPhone, Android mid-range, iPad), thermal soak tests.

@@ -21,6 +21,7 @@ import { GestureRecogniser } from '../input/gestures';
 import { LEVELS, QualityController, TIER_INDEX } from '../performance/quality';
 import { AudioEngine } from '../audio/audio-engine';
 import { PainterlyPipeline, PAINTERLY_BY_LEVEL } from '../renderer/painterly';
+import { FLEX_STEEL, FLEX_TIMBER, StructureFlex, makeFlexUniforms, syncFlexUniforms, type FlexUniforms } from '../physics/flex';
 import type { EnvironmentState, SceneryItem, Settings, TerrainStroke } from '../../types/world';
 import { TIME_HOURS } from '../../types/world';
 
@@ -94,6 +95,8 @@ export class Engine {
   readonly quality = new QualityController(2);
   readonly audio = new AudioEngine();
   readonly painterly: PainterlyPipeline;
+  readonly flex = new StructureFlex();
+  private readonly flexUniforms: FlexUniforms;
   sim: TrainSim;
   track: BakedTrack | null = null;
   design: TrackDesign | null = null;
@@ -157,6 +160,9 @@ export class Engine {
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.setClearColor('#dde6e8');
 
+    this.flexUniforms = makeFlexUniforms(this.flex);
+    this.trackRenderer.enableFlex(this.flexUniforms);
+    this.supports.enableFlex(this.flexUniforms);
     this.painterly = new PainterlyPipeline(Math.max(1, canvas.width), Math.max(1, canvas.height));
     this.rig = new CameraRig(canvas.clientWidth / Math.max(1, canvas.clientHeight));
     this.terrain = new TerrainManager(init.env.biome, init.env.seed, init.strokes);
@@ -289,6 +295,9 @@ export class Engine {
     this.previewRenderer.setColours(design.colours, design.style);
     this.trackRenderer.update(this.track, design.style);
     this.supports.setStyle(design.supportStyle, design.colours.support);
+    // Material behaviour: timber structures flex more; wooden track rolls rougher.
+    this.flex.profile = TIMBER_STYLES.has(design.supportStyle) ? FLEX_TIMBER : FLEX_STEEL;
+    this.sim.trackRoughness = design.style === 'wood' ? 1.55 : design.style === 'mine' ? 1.3 : 1;
     if (!this.previewDesign) this.refreshSupports(animateSupports);
     this.station.build(this.track, (x, z) => this.terrain.heightAt(x, z));
     if (this.track && designKey(design) !== prevKey) {
@@ -623,7 +632,11 @@ export class Engine {
     // Simulation (fixed step; playback speed scales time, never forces).
     const ts = performance.now();
     if (!this.simPaused && this.track) {
-      this.loop.advance(dt, (h) => this.sim.step(h));
+      const tr = this.track;
+      this.loop.advance(dt, (h) => {
+        this.sim.step(h);
+        this.flex.step(this.sim, tr, h);
+      });
       while (this.sim.events.length) {
         const e = this.sim.events.shift()!;
         this.cb.onSimEvent(e);
@@ -647,6 +660,12 @@ export class Engine {
       this.wheelDistance += Math.abs(this.sim.v) * dt;
       this.train.group.visible = true;
       this.train.update(this.track, this.bogies, this.wheelDistance);
+      this.flex.enabled = !(this.settings?.accessibility.reducedMotion ?? false);
+      this.flex.update(this.sim, this.track, this.bogies, (x, z) => this.terrain.heightAt(x, z));
+      syncFlexUniforms(this.flexUniforms, this.flex);
+      const p = this.flex.profile;
+      const calm = this.settings?.accessibility.disableShake ? 0 : 1;
+      this.train.applyFlex((x, y, z, o) => this.flex.offsetAt(x, y, z, o), p.rattle * calm, p.rattleRoll * calm, this.wheelDistance, this.sim.v);
     } else this.train.group.visible = false;
 
     // Camera.

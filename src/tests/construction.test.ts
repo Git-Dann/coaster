@@ -86,12 +86,14 @@ describe('supports', () => {
     expect(a.length).toBeGreaterThan(30);
     expect(a.map((m) => m.key)).toEqual(b.map((m) => m.key));
     for (const m of a) {
-      if (m.kind === 'pad') {
-        const gy = groundAt(m.a[0], m.a[2]);
+      const gy = groundAt(m.a[0], m.a[2]);
+      // Footings (thick pads) must sit into the terrain; thin flange plates sit at column tops.
+      if (m.kind === 'pad' && m.b[1] - m.a[1] > 0.3) {
         expect(m.a[1]).toBeLessThan(gy + 0.01);
         expect(m.b[1]).toBeGreaterThan(gy - 0.01);
       }
     }
+    expect(a.filter((m) => m.kind === 'pad' && m.b[1] - m.a[1] > 0.3).length).toBeGreaterThan(10);
   });
 
   test('editing one end of the track leaves supports elsewhere untouched', () => {
@@ -112,7 +114,10 @@ describe('supports', () => {
   test('timber style builds bents with bracing', () => {
     const d = { ...starterClosed(PAD_HEIGHT + 1), supportStyle: 'pine' as const };
     const m = generateSupports(d, new BakedTrack(d), groundAt);
-    expect(m.filter((x) => x.kind === 'beam').length).toBeGreaterThan(m.filter((x) => x.kind === 'pad').length * 2);
+    expect(m.filter((x) => x.kind === 'beam').length).toBeGreaterThan(m.filter((x) => x.kind === 'pad').length * 4);
+    // Longitudinal bracing ties neighbouring bents together.
+    expect(m.some((x) => x.support.includes('>'))).toBe(true);
+    expect(m.length).toBeLessThan(40000);
   });
 });
 

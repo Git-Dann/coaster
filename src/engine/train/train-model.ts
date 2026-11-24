@@ -169,6 +169,7 @@ const fwd = new THREE.Vector3();
 const upV = new THREE.Vector3();
 const right = new THREE.Vector3();
 const basis = new THREE.Matrix4();
+const rollM = new THREE.Matrix4();
 
 /** Visual train. Reads bogie arc positions from the simulation; never feeds back into physics. */
 export class TrainModel {
@@ -218,6 +219,32 @@ export class TrainModel {
       this.group.add(car.group);
     }
     this.wheelRadius = CAR_PROFILES[cfg.style].wheelRadius;
+  }
+
+  /**
+   * Shift carriages with the structure's deflection and add a small speed-dependent rattle.
+   * The rattle phase comes from distance travelled, so it is frame-rate independent.
+   */
+  applyFlex(offset: (x: number, y: number, z: number, out: [number, number, number]) => [number, number, number], rattle: number, rattleRoll: number, distance: number, speed: number): void {
+    const o: [number, number, number] = [0, 0, 0];
+    const k = Math.min(1, Math.abs(speed) / 14);
+    for (let i = 0; i < this.cars.length; i++) {
+      const g = this.cars[i]!.group;
+      const e = g.matrix.elements;
+      offset(e[12]!, e[13]!, e[14]!, o);
+      const d = distance + i * 1.7;
+      const jy = rattle * k * (Math.sin(d * 9.7) * 0.6 + Math.sin(d * 23.3 + 1.3) * 0.4);
+      const roll = rattleRoll * k * Math.sin(d * 6.1 + i);
+      e[12] = e[12]! + o[0];
+      e[13] = e[13]! + o[1] + jy;
+      e[14] = e[14]! + o[2];
+      if (roll !== 0) {
+        rollM.makeRotationX(roll);
+        g.matrix.multiply(rollM);
+      }
+      if (i === 0) this.leadMatrix.copy(g.matrix);
+      if (i === this.cars.length - 1) this.rearMatrix.copy(g.matrix);
+    }
   }
 
   /**

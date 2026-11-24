@@ -44,7 +44,23 @@ With defaults, the starter coaster loses roughly 15 % of its mechanical energy p
 
 Energy added by lifts, launches and tyres and energy removed by resistance and brakes are accumulated in telemetry (`powered`, `dissipated`), so the energy balance can be audited.
 
-## Integration and timing
+### Track material
+
+Wooden track runs rougher than steel: the rolling-resistance coefficient is multiplied by 1.55 for classic wooden track and 1.3 for mine-train track (`TrainSim.trackRoughness`). A test checks that a train on wooden track arrives measurably slower at the same point in the lap.
+
+### Structural flex (visual, subtle)
+
+`StructureFlex` (`src/engine/physics/flex.ts`) is driven by the simulation but never feeds back into it. Energy lost to the structure is already covered by the rolling-resistance model.
+
+- **Deflection under load**: each bogie deflects the structure by `m·g/k`, spread with a Gaussian along the track. k ≈ 4.2×10⁵ N/m per bogie for timber (about 1 cm per bogie) and about 10× stiffer for steel.
+- **Lateral sway**: one damped mode, driven by the train's horizontal centripetal force. Timber: 1.4 Hz, ζ = 0.07, a few centimetres in hard turns. Steel: 2.6 Hz, millimetres.
+- **Vertical bounce**: one damped mode, driven by the change in normal load in valleys and over crests. Clamped to ±3 cm.
+- **Footings stay planted**: displacement grows with height up the structure. Track and supports bend in the vertex shader; the train rides on the deflected track.
+- **Ride rattle**: a small speed-dependent vertical and roll jitter on the carriages. The phase comes from distance travelled, so it is frame-rate independent. About 6 mm on timber, about 1 mm on steel.
+- **Comfort settings**: reduced motion turns flex off; "No camera shake" turns the rattle off.
+
+The amounts are deliberately within a realistic range: you notice them up close or from the front seat, not from across the park.
+
 
 - Classic **RK4** on (s, v) at a fixed **120 Hz** step. Velocity constraints are applied after each step.
 - 120 Hz vs 60 Hz: both conserve energy well on the test circuits (relative drift ≈1e-5 over 60 s at 120 Hz). Lifts, brakes and the station controller respond more smoothly at 120 Hz, and the cost is negligible (≈0.1 ms per frame for a six-car train on desktop), so 120 Hz is the default.

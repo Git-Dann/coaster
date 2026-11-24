@@ -314,7 +314,7 @@ function woodDetails(b: Builder, track: BakedTrack, s0: number, s1: number, st: 
   for (let s = Math.ceil(s0 / 0.26) * 0.26; s < s1; s += 0.26) {
     track.sample(s, smp);
     if (smp.up[1] < 0.3) continue;
-    for (const side of onLift(s) ? [-1, 1] : [-1]) frameBox(b, smp, side * 1.33, -0.29, 0.44, 0.017, 0.1, PART.sleeper, origin);
+    for (const side of onLift(s) ? [-1, 1] : [-1]) frameBox(b, smp, side * 1.33, -0.29, 0.44, 0.017, 0.072, PART.sleeper, origin);
   }
   // Handrails and catwalk stringers, swept so they follow curves smoothly.
   const rail: Profile = { pts: rrect(-1.85, 0.55, 0.06, 0.06, 0.012), part: PART.spine, smooth: false };

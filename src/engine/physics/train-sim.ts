@@ -71,6 +71,8 @@ export class TrainSim {
   cfg: TrainConfig;
   params: PhysicsParams;
   envPhysics = false;
+  /** Rolling-resistance multiplier for the track type (wooden track runs rougher than steel). */
+  trackRoughness = 1;
   autoDispatch = true;
 
   s = 0;
@@ -225,7 +227,7 @@ export class TrainSim {
       normalSum += b.mass * Math.sqrt(nx * nx + ny * ny + nz * nz);
     }
     const dir = Math.tanh(v / TANH_V);
-    const fRoll = -this.params.rollingCoeff * normalSum * dir;
+    const fRoll = -this.params.rollingCoeff * this.trackRoughness * normalSum * dir;
 
     // Aerodynamic drag on the lead car plus shielded trailing cars.
     const prof = CAR_PROFILES[this.cfg.style];
