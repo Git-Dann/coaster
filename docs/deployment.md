@@ -12,18 +12,22 @@ Static Vite build deployed to **Cloudflare Pages**.
 
 `public/_headers` sets the Content Security Policy, security headers, immutable caching for hashed `/assets/*`, and `no-cache` for HTML, the service worker, the precache manifest and the web manifest so updates are picked up.
 
-## Option A: Cloudflare Git integration (recommended)
+## Current setup: Cloudflare Git integration
+
+The Pages project **cozy-coaster** is connected to `Git-Dann/coaster` (created through the Cloudflare API on 2026-11-24). Production: https://cozy-coaster.pages.dev (from `main`). Each branch push gets a preview URL. GitHub Actions only runs checks.
+
+### Recreating it
 
 In the Cloudflare dashboard: Workers & Pages → Create → Pages → Connect to Git → select `Git-Dann/coaster`, framework preset *None*, build command `npm run build`, output `dist`, environment variable `NODE_VERSION=22`. Cloudflare then builds `main` to production and other branches to preview URLs.
 
-## Option B: GitHub Actions (already in `.github/workflows/ci.yml`)
+## Alternative: deploy from GitHub Actions
 
-The `deploy` job runs after all checks pass and uses `wrangler pages deploy`. Add two repository secrets:
+If Git integration is ever disconnected, add a job that downloads the `dist` artifact and runs `npx wrangler@4 pages deploy dist --project-name=cozy-coaster --branch=$GITHUB_REF_NAME`, with two repository secrets:
 
 - `CLOUDFLARE_API_TOKEN`: token with **Account → Cloudflare Pages → Edit**
 - `CLOUDFLARE_ACCOUNT_ID`
 
-Without them the job logs a skip message and succeeds.
+Do not run both at once, or every push deploys twice.
 
 ## Service worker and updates
 
