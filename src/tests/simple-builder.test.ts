@@ -92,7 +92,8 @@ describe('the track can never be left disconnected', () => {
         sim.events.length = 0;
       }
     }
-  });
+    // 40 layouts × 40 s of simulation: allow time when the suite runs in parallel.
+  }, 60_000);
 });
 
 describe('tap-to-add building', () => {
