@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { BIOME_CONFIG } from '../terrain/heightfield';
+import { withPaintedBands } from '../renderer/materials';
 import { VEG_STRIDE, VEG_TYPES, type VegType } from '../terrain/chunk-gen';
 import type { Biome, SceneryItem, SceneryType } from '../../types/world';
 import {
@@ -130,8 +131,10 @@ export class VegetationLayer {
         m4.compose(pos.set(x, y, z), q, scl.set(s, s * (0.9 + tint * 0.2), s));
         const mesh = this.meshes[type];
         mesh.setMatrixAt(n, m4);
+        // Hue as well as value varies between plants: some lean warm and yellow, some cool and blue.
         const shade = 0.88 + tint * 0.24;
-        col.setRGB(shade, shade * (0.97 + tint * 0.05), shade * 0.96);
+        const warm = Math.sin(tint * 40.0) * 0.5 + 0.5;
+        col.setRGB(shade * (0.94 + warm * 0.12), shade * (0.98 + tint * 0.04), shade * (1.06 - warm * 0.16));
         mesh.setColorAt(n, col);
         counts[type] = n + 1;
       }
@@ -169,7 +172,7 @@ export class SceneryLayer {
   constructor(biome: Biome, foliage: THREE.MeshStandardMaterial) {
     this.biome = biome;
     this.foliage = foliage;
-    this.propMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 });
+    this.propMaterial = withPaintedBands(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 }), 0.45);
     this.glowMaterial = new THREE.MeshStandardMaterial({ color: '#FFE2A8', emissive: new THREE.Color('#FFC873'), emissiveIntensity: 0.4, roughness: 0.6 });
     this.glow = new THREE.InstancedMesh(lanternGlowGeometry(), this.glowMaterial, 1000);
     this.glow.count = 0;

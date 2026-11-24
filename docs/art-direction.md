@@ -19,7 +19,9 @@ These are starting tokens, not a rule for every object. Biomes extend them (see 
 
 ## Principles
 
-- **Rounded and bevelled**: rounded boxes, lathe-profiled pines, welded smooth-shaded foliage blobs. Rocks stay faceted for a chiselled feel.
+- **Painted vegetation**: trees are clusters of irregular leaf clumps with broken silhouettes, not single blobs. Colour is laid as patchy pigment dabs on a four-step ramp (blue-green shadow → mid → light → yellow-green highlight) driven by sun-facing direction, height and noise. Pines have jagged, drooping tiers; birches have airy crowns and marked white bark; trunks taper and fork. Rocks have warm lit planes, cool shaded planes and moss on top. Each instance varies in hue as well as value.
+- **Soft light banding** (`paintedBandsShader`): foliage and props shade in gentle steps rather than smooth CG gradients; foliage adds a warm translucent rim on silhouettes.
+- **Rounded and bevelled** props and structures (rounded boxes, lathe profiles).
 - **Matte painted surfaces** with a subtle world-space mottling (`addPaintedVariation`) instead of textures.
 - **Watercolour rendering** (`src/engine/renderer/painterly.ts`): the scene renders into a multisampled HDR target, then one full-screen pass paints it. A Kuwahara filter flattens shading into pigment areas, and a wet-edge wobble shifts edges slightly. Pigment pools where colours meet. Soft, broken ink lines come from depth edges. Paper fibres, grain and granulation follow the pigment. Distance dissolves into the sky's horizon wash. A warm-lights/cool-shadows grade finishes it. The filter strength scales with the quality tier: no Kuwahara on Battery, radius 1 on Low, 2 on Balanced, 3 on High and Ultra. It can be switched off with Settings → Graphics → Watercolour painting (`graphics.postProcessing`).
 - **Painted sky**: pale paper near the horizon with uneven washes of colour above, darker pigment rims, and clouds left as unpainted paper with cool undersides.

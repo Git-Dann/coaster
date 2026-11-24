@@ -68,3 +68,36 @@ export const SUPPORT_MATERIALS = {
   galvanised: { colour: '#B9BDBA', roughness: 0.45, metalness: 0.55, timber: false },
   industrial: { colour: '#55745B', roughness: 0.6, metalness: 0.2, timber: false },
 } as const;
+
+/**
+ * Soft painted light banding: light falls in a few gentle steps instead of a smooth CG
+ * gradient, and (optionally) a warm translucent rim lights silhouettes like backlit leaves.
+ * Call from inside an onBeforeCompile hook of a MeshStandardMaterial.
+ */
+export function paintedBandsShader(shader: { fragmentShader: string }, strength = 0.5, rim = 0): void {
+  shader.fragmentShader = shader.fragmentShader.replace(
+    '#include <opaque_fragment>',
+    `{
+  float lumP = max(dot(outgoingLight, vec3(0.299, 0.587, 0.114)), 1e-4);
+  float pl = pow(lumP, 0.4545) * 4.0;
+  float ql = (floor(pl) + smoothstep(0.3, 0.7, fract(pl))) / 4.0;
+  float target = pow(max(ql, 0.02), 2.2);
+  outgoingLight = mix(outgoingLight, outgoingLight * (target / lumP), ${strength.toFixed(3)});
+  ${rim > 0 ? `float rimP = pow(1.0 - clamp(dot(normalize(vNormal), normalize(vViewPosition)), 0.0, 1.0), 3.0);
+  outgoingLight += diffuseColor.rgb * vec3(1.0, 0.92, 0.62) * rimP * ${rim.toFixed(3)};` : ''}
+}
+#include <opaque_fragment>`,
+  );
+}
+
+/** Apply soft painted banding to any standard material (chains an existing onBeforeCompile). */
+export function withPaintedBands<T extends THREE.MeshStandardMaterial>(mat: T, strength = 0.45): T {
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = (shader, r) => {
+    prev.call(mat, shader, r);
+    paintedBandsShader(shader, strength, 0);
+  };
+  const prevKey = mat.customProgramCacheKey();
+  mat.customProgramCacheKey = () => `${prevKey}|bands${strength}`;
+  return mat;
+}
