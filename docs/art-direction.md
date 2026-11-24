@@ -21,7 +21,10 @@ These are starting tokens, not a rule for every object. Biomes extend them (see 
 
 - **Rounded and bevelled**: rounded boxes, lathe-profiled pines, welded smooth-shaded foliage blobs. Rocks stay faceted for a chiselled feel.
 - **Matte painted surfaces** with a subtle world-space mottling (`addPaintedVariation`) instead of textures.
-- **Light does the work**: warm keyed sun, hemisphere sky/ground fill, soft PCF shadows, ACES tone mapping, exponential fog matched to the horizon colour for atmospheric perspective. No bloom or heavy post-processing.
+- **Watercolour rendering** (`src/engine/renderer/painterly.ts`): the scene renders into a multisampled HDR target, then one full-screen pass paints it. A Kuwahara filter flattens shading into pigment areas, and a wet-edge wobble shifts edges slightly. Pigment pools where colours meet. Soft, broken ink lines come from depth edges. Paper fibres, grain and granulation follow the pigment. Distance dissolves into the sky's horizon wash. A warm-lights/cool-shadows grade finishes it. The filter strength scales with the quality tier: no Kuwahara on Battery, radius 1 on Low, 2 on Balanced, 3 on High and Ultra. It can be switched off with Settings → Graphics → post-processing (`graphics.postProcessing`).
+- **Painted sky**: pale paper near the horizon with uneven washes of colour above, darker pigment rims, and clouds left as unpainted paper with cool undersides.
+- **World-anchored blooms**: the terrain gets large warm and cool washes and directional brush texture in its vertex colours, so the painting never swims as the camera moves. Foliage carries a painter's gradient: warm, light tops and cool, deep undersides.
+- **Light**: warm keyed sun, a cool hemisphere fill that shows through slightly lifted shadows (coloured shadows), and ACES tone mapping.
 - **Composition**: the starter scene frames station, lift and drop with the meadow and woodland behind.
 - **No people**: carriages have empty seats and restraints only.
 

@@ -18,9 +18,9 @@ const KEYS: Key[] = [
   { h: 0, zenith: '#0E1527', horizon: '#26304A', sun: '#9FB0D8', sunI: 0.3, hemiSky: '#3A4A6E', hemiGround: '#1C2219', hemiI: 0.45, fog: '#232C42' },
   { h: 4.8, zenith: '#15203A', horizon: '#3A4362', sun: '#9FB0D8', sunI: 0.25, hemiSky: '#46557A', hemiGround: '#22281D', hemiI: 0.5, fog: '#323B57' },
   { h: 6.2, zenith: '#7C9AC0', horizon: '#F2B98C', sun: '#FFB474', sunI: 1.3, hemiSky: '#C9B9B4', hemiGround: '#5E5A44', hemiI: 0.9, fog: '#E8C3A6' },
-  { h: 9, zenith: '#6E9DCC', horizon: '#E4E4D6', sun: '#FFF0D8', sunI: 2.7, hemiSky: '#D4E2EC', hemiGround: '#7C7A55', hemiI: 1.15, fog: '#DCE3E2' },
-  { h: 12.5, zenith: '#6A9AD0', horizon: '#E0E9EA', sun: '#FFF7EC', sunI: 3.0, hemiSky: '#D9E6EE', hemiGround: '#7F7D58', hemiI: 1.2, fog: '#DDE6E8' },
-  { h: 15.5, zenith: '#6F9BC8', horizon: '#EADFC6', sun: '#FFE6C0', sunI: 2.8, hemiSky: '#E1DFD6', hemiGround: '#7E7552', hemiI: 1.15, fog: '#E6E0CF' },
+  { h: 9, zenith: '#7FA9CF', horizon: '#F1E8D6', sun: '#FFF0D8', sunI: 2.7, hemiSky: '#D4E2EC', hemiGround: '#7C7A55', hemiI: 1.15, fog: '#E6E4DA' },
+  { h: 12.5, zenith: '#7BA6D2', horizon: '#EEEADC', sun: '#FFF7EC', sunI: 3.0, hemiSky: '#D9E6EE', hemiGround: '#7F7D58', hemiI: 1.2, fog: '#E4E6E0' },
+  { h: 15.5, zenith: '#80A6CB', horizon: '#F3E5CB', sun: '#FFE6C0', sunI: 2.8, hemiSky: '#E1DFD6', hemiGround: '#7E7552', hemiI: 1.15, fog: '#ECE3D0' },
   { h: 18.4, zenith: '#7F98BE', horizon: '#F2BE84', sun: '#FFB565', sunI: 2.1, hemiSky: '#E6CDB0', hemiGround: '#6D6043', hemiI: 0.95, fog: '#EDC9A0' },
   { h: 19.6, zenith: '#4A5F86', horizon: '#A8A2C0', sun: '#8E92BC', sunI: 0.2, hemiSky: '#7D86AA', hemiGround: '#353A31', hemiI: 0.7, fog: '#8A8AA8' },
   { h: 21, zenith: '#1A2440', horizon: '#3E4766', sun: '#9FB0D8', sunI: 0.3, hemiSky: '#46557A', hemiGround: '#22281D', hemiI: 0.5, fog: '#323B57' },
@@ -64,27 +64,40 @@ varying vec3 vDir;
 float h(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }
 float n(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.-2.*f);
   return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y); }
-float fbm(vec2 p){ float s=0., a=.5; for(int i=0;i<4;i++){ s+=a*n(p); p*=2.03; a*=.5; } return s; }
+float fbm(vec2 p){ float s=0., a=.5; for(int i=0;i<5;i++){ s+=a*n(p); p*=2.03; a*=.5; } return s; }
+// Watercolour sky: a pale paper ground near the horizon with uneven washes of colour above.
+// Wash edges are a little darker (pigment dries at the rim), clouds are paper left unpainted.
 void main(){
   vec3 d = normalize(vDir);
   float y = d.y;
-  float t = pow(clamp(y, 0.0, 1.0), 0.32);
+  vec2 uv = d.xz / (max(y, 0.0) + 0.25);
+  float wash = fbm(uv * 0.9 + vec2(uTime * 0.002, 0.0));
+  float t = smoothstep(-0.04, 0.32, y + (wash - 0.5) * 0.3);
   vec3 col = mix(uHorizon, uZenith, t);
-  col = mix(col, uGround, smoothstep(0.0, -0.12, y));
+  // Pigment rims where the wash fades.
+  float rim = smoothstep(0.42, 0.5, wash) * (1.0 - smoothstep(0.5, 0.6, wash));
+  col *= 1.0 - rim * 0.07 * smoothstep(0.0, 0.3, y);
+  // Second, looser wash for variation.
+  col = mix(col, col * vec3(0.94, 0.97, 1.04), smoothstep(0.55, 0.8, fbm(uv * 0.35 + 4.0)) * 0.6);
+  col = mix(col, uGround, smoothstep(0.0, -0.1, y));
   float sd = max(dot(d, uSunDir), 0.0);
-  col += uSunColor * (pow(sd, 6.0) * 0.18 + pow(sd, 64.0) * 0.35) * uSunVis;
-  col += uSunColor * smoothstep(0.9993, 0.9997, sd) * 2.2 * uSunVis;
-  // Soft painted clouds on a flattened dome.
+  col += uSunColor * (pow(sd, 5.0) * 0.16 + pow(sd, 40.0) * 0.22) * uSunVis;
+  // Sun as a soft painted disc.
+  col = mix(col, uSunColor * 1.35, smoothstep(0.9975, 0.999, sd) * uSunVis * 0.8);
+  // Clouds: unpainted paper with soft, slightly ragged edges and a cool shaded underside.
   if (y > -0.02) {
-    vec2 uv = d.xz / (y + 0.18) * 1.6 + vec2(uTime * 0.004, uTime * 0.0015);
-    float c = fbm(uv);
-    float cov = smoothstep(1.0 - uCloud, 1.0 - uCloud + 0.28, c) * smoothstep(-0.02, 0.18, y);
-    vec3 cloudCol = mix(uHorizon * 1.04, vec3(1.0), 0.45) * (0.9 + 0.1 * c);
-    cloudCol = mix(cloudCol, uSunColor, pow(sd, 4.0) * 0.25);
-    cloudCol = mix(cloudCol, uZenith * 1.3, uNight * 0.7);
-    col = mix(col, cloudCol, cov * 0.92);
+    vec2 cuv = uv * 0.7 + vec2(uTime * 0.004, uTime * 0.0012);
+    float c = fbm(cuv) + 0.18 * fbm(cuv * 3.0);
+    float cov = smoothstep(1.02 - uCloud, 1.18 - uCloud, c) * smoothstep(-0.02, 0.2, y);
+    vec3 paper = mix(vec3(0.97, 0.94, 0.88), uHorizon * 1.05, 0.25);
+    vec3 shade = mix(paper, uZenith * 0.85 + vec3(0.06, 0.05, 0.08), 0.35);
+    vec3 cloudCol = mix(paper, shade, smoothstep(0.5, 1.0, fbm(cuv * 1.7 + 9.0)));
+    cloudCol = mix(cloudCol, uSunColor, pow(sd, 6.0) * 0.25);
+    cloudCol = mix(cloudCol, uZenith * 1.4, uNight * 0.7);
+    float cloudRim = smoothstep(0.0, 0.15, cov) * (1.0 - smoothstep(0.15, 0.45, cov));
+    col = mix(col, cloudCol, cov * 0.95);
+    col *= 1.0 - cloudRim * 0.05;
   }
-  // Stars.
   if (uNight > 0.01 && y > 0.0) {
     vec2 sp = d.xz / (y + 0.4) * 160.0;
     float s = step(0.9965, h(floor(sp))) * smoothstep(0.0, 0.25, y) * (1.0 - uCloud);
@@ -187,10 +200,18 @@ export class Atmosphere {
     this.sun.castShadow = true;
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.04;
-    this.sun.shadow.radius = 3;
+    // Soft, slightly lighter shadows: the cool hemisphere fill shows through, giving coloured shadows.
+    this.sun.shadow.radius = 4;
+    this.sun.shadow.blurSamples = 10;
+    this.sun.shadow.intensity = 0.9;
     this.setShadowQuality(2048, 90);
     this.hemi = new THREE.HemisphereLight('#dfe8ee', '#7c7a55', 1.1);
     this.fog = new THREE.FogExp2('#dde6e8', this.baseFog);
+  }
+
+  /** Current (blended) sky horizon colour, used by the painterly distance wash. */
+  get horizon(): THREE.Color {
+    return this.uniforms.uHorizon!.value as THREE.Color;
   }
 
   setShadowQuality(mapSize: number, extent: number): void {

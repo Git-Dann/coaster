@@ -20,6 +20,7 @@ import { CameraRig, type CameraMode } from '../camera/camera-rig';
 import { GestureRecogniser } from '../input/gestures';
 import { LEVELS, QualityController, TIER_INDEX } from '../performance/quality';
 import { AudioEngine } from '../audio/audio-engine';
+import { PainterlyPipeline, PAINTERLY_BY_LEVEL } from '../renderer/painterly';
 import type { EnvironmentState, SceneryItem, Settings, TerrainStroke } from '../../types/world';
 import { TIME_HOURS } from '../../types/world';
 
@@ -92,6 +93,7 @@ export class Engine {
   readonly loop = new FixedStepLoop(1 / 120);
   readonly quality = new QualityController(2);
   readonly audio = new AudioEngine();
+  readonly painterly: PainterlyPipeline;
   sim: TrainSim;
   track: BakedTrack | null = null;
   design: TrackDesign | null = null;
@@ -151,9 +153,11 @@ export class Engine {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
     this.renderer.shadowMap.enabled = true;
+    // Crisp maps; the painterly pass softens their edges into washes.
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.setClearColor('#dde6e8');
 
+    this.painterly = new PainterlyPipeline(Math.max(1, canvas.width), Math.max(1, canvas.height));
     this.rig = new CameraRig(canvas.clientWidth / Math.max(1, canvas.clientHeight));
     this.terrain = new TerrainManager(init.env.biome, init.env.seed, init.strokes);
     this.vegetation = new VegetationLayer(init.env.biome);
@@ -260,6 +264,8 @@ export class Engine {
     const h = Math.max(1, this.canvas.clientHeight);
     this.applyPixelRatio();
     this.renderer.setSize(w, h, false);
+    const db = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+    this.painterly.setSize(db.x, db.y);
     this.rig.camera.aspect = w / h;
     this.rig.camera.updateProjectionMatrix();
   }
@@ -403,6 +409,8 @@ export class Engine {
     this.weather.density = lvl.weather * (g?.weatherDensity ?? 1);
     this.terrain.drawDistance = lvl.drawDistance * (g?.drawDistance ?? 1);
     this.atmosphere.baseFog = 1.45 / this.terrain.drawDistance;
+    this.painterly.enabled = g?.postProcessing ?? true;
+    this.painterly.apply(PAINTERLY_BY_LEVEL[this.quality.level]!);
     this.applyPixelRatio();
     this.resize();
   }
@@ -680,7 +688,7 @@ export class Engine {
     // Audio.
     this.updateAudio(dt, supportsMoving);
 
-    this.renderer.render(this.scene, cam);
+    this.painterly.render(this.renderer, this.scene, cam, this.elapsed, this.atmosphere.horizon, this.terrain.drawDistance);
 
     // Performance bookkeeping.
     this.cpuMs = performance.now() - t0;
@@ -778,7 +786,7 @@ export class Engine {
 
   /** Render one frame and return it as a data URL (PNG or JPEG). */
   capture(type: 'image/png' | 'image/jpeg' = 'image/png', maxWidth = 0): string {
-    this.renderer.render(this.scene, this.rig.camera);
+    this.painterly.render(this.renderer, this.scene, this.rig.camera, this.elapsed, this.atmosphere.horizon, this.terrain.drawDistance);
     const src = this.renderer.domElement;
     if (!maxWidth || src.width <= maxWidth) return src.toDataURL(type, 0.9);
     const c = document.createElement('canvas');
@@ -804,6 +812,7 @@ export class Engine {
     this.trackRenderer.dispose();
     this.previewRenderer.dispose();
     this.audio.dispose();
+    this.painterly.dispose();
     this.renderer.dispose();
   }
 }

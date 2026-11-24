@@ -30,12 +30,27 @@ function prep(g: Geo, colour: THREE.ColorRepresentation, sway: number | ((y: num
   const sw = new Float32Array(n);
   const c = new THREE.Color(colour);
   const rnd = mulberry32(seed);
+  // Painter's gradient for foliage: warm, light tops and cool, deeper undersides.
+  const leafy = sway !== 0 && typeof sway === 'function';
+  geo.computeBoundingBox();
+  const y0 = geo.boundingBox!.min.y;
+  const y1 = geo.boundingBox!.max.y;
   for (let i = 0; i < n; i++) {
     const y = pos.getY(i);
     const v = 1 + (rnd() - 0.5) * jitter;
-    col[i * 3] = c.r * v;
-    col[i * 3 + 1] = c.g * v;
-    col[i * 3 + 2] = c.b * v;
+    let r = c.r * v;
+    let g = c.g * v;
+    let b = c.b * v;
+    if (leafy && y1 > y0) {
+      const t = (y - y0) / (y1 - y0);
+      const warm = 0.8 + t * 0.38;
+      r *= warm * (1 + t * 0.12);
+      g *= warm;
+      b *= warm * (1.18 - t * 0.35);
+    }
+    col[i * 3] = r;
+    col[i * 3 + 1] = g;
+    col[i * 3 + 2] = b;
     sw[i] = typeof sway === 'function' ? sway(y) : sway;
   }
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));

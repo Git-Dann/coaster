@@ -37,8 +37,8 @@ export const BIOME_CONFIG: Record<Biome, BiomeConfig> = {
     amp: 9,
     largeAmp: 16,
     ridge: 0,
-    grassLow: hex('#9DB27E'),
-    grassHigh: hex('#B4BE86'),
+    grassLow: hex('#93B377'),
+    grassHigh: hex('#B6C784'),
     dry: hex('#C9C08A'),
     rock: hex('#9A9585'),
     sand: hex('#D9CBA3'),
@@ -366,8 +366,21 @@ export class Heightfield {
       out[1] += (c.path[1] - out[1]) * paint;
       out[2] += (c.path[2] - out[2]) * paint;
     }
-    // Subtle hand-painted mottling.
-    const m = 0.94 + n2 * 0.1;
+    // Watercolour blooms: large, soft, uneven washes of warmer and cooler pigment, anchored to
+    // the world so they never swim with the camera.
+    const bloomA = smooth(0.35, 0.75, this.n.noise(x / 95 + 3.1, z / 95 - 8.4) * 0.5 + 0.5);
+    const bloomB = smooth(0.4, 0.8, this.n2.noise(x / 61 - 5.2, z / 61 + 2.7) * 0.5 + 0.5);
+    const warmK = bloomA * 0.32;
+    const coolK = bloomB * 0.22 * (1 - warmK);
+    out[0] = out[0] + (out[0] * 1.12 + 0.05 - out[0]) * warmK;
+    out[1] = out[1] + (out[1] * 1.02 + 0.03 - out[1]) * warmK;
+    out[2] = out[2] + (out[2] * 0.82 - out[2]) * warmK;
+    out[0] = out[0] + (out[0] * 0.86 - out[0]) * coolK;
+    out[1] = out[1] + (out[1] * 0.97 - out[1]) * coolK;
+    out[2] = out[2] + (out[2] * 1.12 + 0.03 - out[2]) * coolK;
+    // Directional brush texture and fine mottling.
+    const stroke = this.n2.noise(x / 22 + z / 70, z / 5.5) * 0.5 + 0.5;
+    const m = 0.92 + n2 * 0.08 + stroke * 0.07;
     out[0] *= m;
     out[1] *= m;
     out[2] *= m;
