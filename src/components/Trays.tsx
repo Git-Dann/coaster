@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useGame } from '../stores/game';
 import { Icon } from '../design-system/Icon';
 import { SWATCHES } from '../design-system/controls';
@@ -40,8 +40,15 @@ function Card(props: { label: string; icon?: string; swatch?: string; on?: boole
 }
 
 function Row(props: { children: ReactNode; label: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Bring the selected item into view when the row opens.
+  useEffect(() => {
+    const row = ref.current;
+    const on = row?.querySelector<HTMLElement>('.on');
+    if (row && on) row.scrollLeft = Math.max(0, on.offsetLeft - row.clientWidth / 2 + on.clientWidth / 2);
+  }, []);
   return (
-    <div className="cc-row-scroll" role="group" aria-label={props.label}>
+    <div ref={ref} className="cc-row-scroll" role="group" aria-label={props.label}>
       {props.children}
     </div>
   );
@@ -69,7 +76,11 @@ function Tabs<T extends string>(props: { value: T; options: Array<{ value: T; la
 }
 
 function Swatch(props: { colour: string; on: boolean; label: string; onClick: () => void }) {
-  return <button type="button" className={`cc-dot${props.on ? ' on' : ''}`} style={{ background: props.colour }} aria-label={props.label} aria-pressed={props.on} onClick={props.onClick} />;
+  return (
+    <button type="button" className={`cc-dot${props.on ? ' on' : ''}`} aria-label={props.label} aria-pressed={props.on} onClick={props.onClick}>
+      <span className="cc-dot-fill" style={{ background: props.colour }} />
+    </button>
+  );
 }
 
 // ------------------------------------------------------------------ Build

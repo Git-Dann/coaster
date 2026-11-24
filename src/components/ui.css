@@ -1189,3 +1189,34 @@
     height: 56%;
   }
 }
+
+/* Swatch selection ring drawn inside the swatch's own box so scrolling rows never clip it. */
+.cc-dot {
+  width: 46px;
+  height: 46px;
+  padding: 3px;
+  border: 2.5px solid transparent;
+  background-clip: content-box;
+  box-shadow: none;
+  transition: border-color var(--t-fast);
+}
+.cc-dot.on {
+  transform: none;
+  box-shadow: none;
+  border-color: var(--charcoal);
+}
+.cc-row-scroll {
+  padding-top: 4px;
+  padding-bottom: 6px;
+}
+.cc-dot {
+  background: transparent;
+  display: grid;
+  place-items: center;
+}
+.cc-dot-fill {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(52, 60, 55, 0.16);
+}
