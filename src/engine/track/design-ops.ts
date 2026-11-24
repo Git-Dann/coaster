@@ -43,7 +43,7 @@ export function uprightBankAtEnd(d: TrackDesign, baked: BakedTrack): number {
   return last.bank - roll;
 }
 
-export function appendElement(d: TrackDesign, res: ElementResult): TrackDesign {
+export function appendElement(d: TrackDesign, res: ElementResult, group?: string): TrackDesign {
   const next = cloneDesign(d);
   const last = next.nodes[next.nodes.length - 1];
   if (last) {
@@ -51,7 +51,7 @@ export function appendElement(d: TrackDesign, res: ElementResult): TrackDesign {
     last.param = res.startParam;
   }
   for (const n of res.nodes) {
-    next.nodes.push({ id: newNodeId(), p: [...n.p] as V3, dir: [...n.dir] as V3, bank: n.bank, kind: n.kind ?? 'track', param: n.param, tension: n.tension });
+    next.nodes.push({ id: newNodeId(), p: [...n.p] as V3, dir: [...n.dir] as V3, bank: n.bank, kind: n.kind ?? 'track', param: n.param, tension: n.tension, group });
   }
   // The newly open end is plain track.
   const end = next.nodes[next.nodes.length - 1];
@@ -177,4 +177,32 @@ export function updateNode(d: TrackDesign, id: string, patch: Partial<Omit<Track
   const n = next.nodes.find((x) => x.id === id);
   if (n) Object.assign(n, patch);
   return next;
+}
+
+/** Remove the most recently placed piece (all nodes of the last group). The station always stays. */
+export function removeLastPiece(d: TrackDesign): TrackDesign {
+  const next = cloneDesign(d);
+  next.closed = false;
+  const last = next.nodes[next.nodes.length - 1];
+  if (!last || next.nodes.length <= 2) return next;
+  const g = last.group;
+  if (!g || g === 'station') {
+    if (next.nodes.length > 2) next.nodes.pop();
+  } else {
+    while (next.nodes.length > 2 && next.nodes[next.nodes.length - 1]!.group === g) next.nodes.pop();
+  }
+  const end = next.nodes[next.nodes.length - 1]!;
+  end.kind = end.group === 'station' && next.nodes.length === 2 ? 'track' : end.kind === 'station' ? 'station' : 'track';
+  end.param = undefined;
+  return next;
+}
+
+/** Keep placed track above the ground (tunnels excepted). */
+export function liftAboveGround(d: TrackDesign, fromIndex: number, groundAt: (x: number, z: number) => number, clearance = 1.1): TrackDesign {
+  for (let i = Math.max(1, fromIndex); i < d.nodes.length; i++) {
+    const n = d.nodes[i]!;
+    const g = groundAt(n.p[0], n.p[2]) + clearance;
+    if (n.p[1] < g && n.kind !== 'tunnel') n.p[1] = g;
+  }
+  return d;
 }

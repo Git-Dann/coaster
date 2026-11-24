@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { FixedStepLoop } from './fixed-step';
 import type { V3 } from './vec3';
 import { BakedTrack, newSample } from '../track/bake';
+import { withReturn } from '../track/auto-return';
 import type { TrackDesign } from '../track/types';
 import { TrackRenderer } from '../track/track-renderer';
 import { TrainSim, type SimEvent } from '../physics/train-sim';
@@ -69,7 +70,8 @@ export interface HandleState {
   visible: boolean;
 }
 
-const HANDLE_PX = 42;
+/** Finger-sized hit radius for the track-end ring (CSS pixels). */
+const HANDLE_PX = 64;
 
 /**
  * The game engine. Owns the renderer and a single requestAnimationFrame scheduler.
@@ -100,6 +102,8 @@ export class Engine {
   sim: TrainSim;
   track: BakedTrack | null = null;
   design: TrackDesign | null = null;
+  /** The player's design plus the automatic return: what is actually rendered and ridden. */
+  ridden: TrackDesign | null = null;
   previewDesign: TrackDesign | null = null;
   previewTrack: BakedTrack | null = null;
   private gestures: GestureRecogniser;
@@ -292,7 +296,9 @@ export class Engine {
     const prevKey = this.design ? designKey(this.design) : '';
     this.design = design;
     const valid = design.nodes.length >= 2;
-    this.track = valid ? new BakedTrack(design) : null;
+    // The ridden circuit always includes the automatic return, so the track is never disconnected.
+    this.ridden = valid ? withReturn(design, { groundAt: (x, z) => this.terrain.heightAt(x, z), speed: estimateSpeed(design) }) : design;
+    this.track = valid ? new BakedTrack(this.ridden) : null;
     this.trackRenderer.setColours(design.colours, design.style);
     this.previewRenderer.setColours(design.colours, design.style);
     this.trackRenderer.update(this.track, design.style);
@@ -326,7 +332,7 @@ export class Engine {
   }
 
   private refreshSupports(animate: boolean): void {
-    const d = this.previewDesign ?? this.design;
+    const d = this.previewDesign ?? this.ridden;
     const t = this.previewDesign ? this.previewTrack : this.track;
     let members: Member[] = [];
     if (d && t) members = generateSupports(d, t, (x, z) => this.terrain.heightAt(x, z));
@@ -359,8 +365,7 @@ export class Engine {
       this.vegetation.setBiome(env.biome);
       this.scenery.setBiome(env.biome);
       this.scenery.rebuild(this.sceneryItems, (x, z) => this.terrain.heightAt(x, z));
-      this.refreshSupports(false);
-      if (this.track) this.station.build(this.track, (x, z) => this.terrain.heightAt(x, z));
+      if (this.design) this.setDesign(this.design, false);
     }
     this.atmosphere.setTarget({ hour: TIME_HOURS[env.time], weather: env.weather, biome: env.biome }, false);
     this.atmosphere.autoCycle = env.autoCycle;
@@ -388,7 +393,8 @@ export class Engine {
   }
 
   private afterTerrainChange(): void {
-    // Supports re-anchor to the new ground; scenery follows the surface.
+    // The return track re-routes over the new ground; supports re-anchor; scenery follows the surface.
+    if (this.design) this.setDesign(this.design, true);
     this.refreshSupports(true);
     this.scenery.rebuild(this.sceneryItems, (x, z) => this.terrain.heightAt(x, z));
     this.blockRev++;
@@ -453,6 +459,12 @@ export class Engine {
     this.loop.reset();
   }
 
+  /** Smoothly move the build camera to look at a point, keeping the current zoom. */
+  lookAt(p: V3): void {
+    if (this.rig.mode !== 'orbit') return;
+    this.rig.focusOn(new THREE.Vector3(p[0], p[1] - 2, p[2]), Math.max(this.rig.distance, 45));
+  }
+
   frameCoaster(): void {
     const t = this.track;
     if (!t) return;
@@ -493,7 +505,6 @@ export class Engine {
   pick(x: number, y: number): PickResult {
     if (this.buildMode && this.handles.visible && this.handles.end) {
       const e = this.handles.end;
-      if (this.project([e[0], e[1] + 3.2, e[2]], this.scr) && this.scr.distanceTo({ x, y }) < HANDLE_PX) return { type: 'height' };
       if (this.project(e, this.scr) && this.scr.distanceTo({ x, y }) < HANDLE_PX) return { type: 'end' };
     }
     if (this.design && this.buildMode) {
@@ -710,7 +721,7 @@ export class Engine {
       if (this.handles.dir) this.endHandle.lookAt(e[0] + this.handles.dir[0], e[1] + this.handles.dir[1], e[2] + this.handles.dir[2]);
       const pulse = 1 + Math.sin(this.elapsed * 3) * (this.settings?.accessibility.reducedMotion ? 0 : 0.06);
       this.endHandle.scale.setScalar(pulse);
-      this.heightHandle.position.set(e[0], e[1] + 1.6, e[2]);
+      this.heightHandle.visible = false;
     }
 
     // Audio.
@@ -843,6 +854,16 @@ export class Engine {
     this.painterly.dispose();
     this.renderer.dispose();
   }
+}
+
+/** Expected train speed at the end of the player's track, from the height it has fallen (with losses). */
+function estimateSpeed(d: TrackDesign): number {
+  let maxY = -Infinity;
+  for (const n of d.nodes) maxY = Math.max(maxY, n.p[1]);
+  const end = d.nodes[d.nodes.length - 1];
+  const launch = Math.max(0, ...d.nodes.filter((n) => n.kind === 'launch').map((n) => n.param ?? 0));
+  const fall = end ? maxY - end.p[1] : 0;
+  return Math.min(24, Math.max(8, Math.sqrt(2 * 9.81 * Math.max(0, fall)) * 0.85, launch * 0.85));
 }
 
 function designKey(d: TrackDesign): string {

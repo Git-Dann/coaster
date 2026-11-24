@@ -16,7 +16,12 @@ master (gentle compressor + safety limiter) → interface, construction, coaster
 - **Construction**: timber (warm knocks, light creaks) vs steel (rounded taps, short inharmonic ring); snap, place, delete, preview tick; a soft continuous mechanical texture while supports grow.
 - **Coaster**: rolling noise and filter following speed, timber rumble vs steel resonance, wind rising with speed², airtime whoosh, brake hiss, launch whoosh, lift hum, chain-dog clicks every 0.42 m of lift travel, distance attenuation and stereo pan.
 - **Environment**: birds (none at night or in rain), night insects, wind (altitude and biome), river/sea water by proximity, rain, snow air. 1.5 s crossfades.
-- **Music**: optional, off unless enabled. Sparse soft-piano phrases in F major pentatonic with 20–60 s silences.
+- **Music**: generative lo-fi / chillhop, on by default (toggle in the Menu), all synthesised at runtime.
+  - **Songs:** each lasts 2–3 minutes at 72–82 BPM with a laid-back swing. Each new song has its own key, chord progression and chord colours.
+  - **Instruments:** Rhodes-style keys with smooth voice leading, a warm bass, a boom-bap kick, brushed snare, swung hats and occasional sparse pentatonic melodies.
+  - **Texture:** vinyl crackle, tape wow and flutter, and gentle saturation plus a low-pass for warmth.
+  - **Structure:** intro → groove → variation → groove → outro, then a crossfade into the next song.
+  - **Scheduling:** notes are scheduled ahead on the audio clock (look-ahead), skipping forward after pauses so there are no bursts.
 
 Rate limiting and a 24-voice cap stop continuous drags from machine-gunning. Audio unlocks on the first user gesture; tabs going to the background suspend the context.
 

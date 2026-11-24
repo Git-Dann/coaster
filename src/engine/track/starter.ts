@@ -10,7 +10,7 @@ import type { TrackDesign } from './types';
  */
 export function starterDesign(y0: number): TrackDesign {
   let d: TrackDesign = {
-    nodes: [{ id: 'start', p: [0, y0, 0], dir: [1, 0, 0], bank: 0, kind: 'station' }],
+    nodes: [{ id: 'start', p: [0, y0, 0], dir: [1, 0, 0], bank: 0, kind: 'station', group: 'station' }],
     closed: false,
     style: 'tubular',
     supportStyle: 'powder-steel',
@@ -22,7 +22,11 @@ export function starterDesign(y0: number): TrackDesign {
     const res = fn({ p: [...last.p] as V3, dir: [...last.dir] as V3, bank: last.bank });
     d = appendElement(d, res);
     // Deterministic ids for the starter so supports and saves are stable.
-    for (let i = d.nodes.length - res.nodes.length; i < d.nodes.length; i++) d.nodes[i]!.id = `s${n++}`;
+    for (let i = d.nodes.length - res.nodes.length; i < d.nodes.length; i++) {
+      d.nodes[i]!.id = `s${n}_${i}`;
+      d.nodes[i]!.group = d.nodes.length - res.nodes.length === 1 ? 'station' : `s${n}`;
+    }
+    n++;
   };
 
   add((c) => straight(c, 20, 'station'));
@@ -61,4 +65,35 @@ export function starterClosed(y0: number): TrackDesign {
   last.kind = 'brake';
   last.param = 1.5;
   return { ...d, closed: true };
+}
+
+/**
+ * The starter as the player sees it in the game: the station, lift, drop, turnaround and airtime
+ * hill as placed pieces, with the automatic return carrying the train home.
+ */
+export function starterPlayable(y0: number): TrackDesign {
+  let d: TrackDesign = {
+    nodes: [{ id: 'start', p: [0, y0, 0], dir: [1, 0, 0], bank: 0, kind: 'station', group: 'station' }],
+    closed: false,
+    style: 'tubular',
+    supportStyle: 'powder-steel',
+    colours: { rail: '#C77D62', spine: '#C77D62', sleeper: '#765B48', support: '#F5EBDD' },
+  };
+  let n = 0;
+  const add = (fn: (c: Cursor) => ElementResult, group: string) => {
+    const last = d.nodes[d.nodes.length - 1]!;
+    const res = fn({ p: [...last.p] as V3, dir: [...last.dir] as V3, bank: last.bank });
+    d = appendElement(d, res, group);
+    for (let i = d.nodes.length - res.nodes.length; i < d.nodes.length; i++) d.nodes[i]!.id = `sp${n}_${i}`;
+    n++;
+  };
+  add((c) => straight(c, 20, 'station'), 'station');
+  add((c) => straight(c, 5), 'p1');
+  add((c) => liftHill(c, 20, 32, 3.4), 'p2');
+  add((c) => drop(c, 18.5, 50), 'p3');
+  add((c) => piece(c, { length: 64, turn: 180, rise: 4, bank: -55 }), 'p4');
+  add((c) => piece(c, { length: 26, turn: 0, rise: -4, bank: 0, ease: 'none' }), 'p5');
+  add((c) => hill(c, 6, 46), 'p6');
+  add((c) => piece(c, { length: 20, turn: 0, rise: 0, bank: 0, ease: 'none' }), 'p7');
+  return d;
 }

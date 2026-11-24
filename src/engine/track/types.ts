@@ -27,6 +27,8 @@ export interface TrackNode {
   param?: number;
   /** Tangent magnitude multiplier for the outgoing segment (1 = circular-arc estimate). */
   tension?: number;
+  /** Which placed piece this node belongs to ('station', a piece id, or 'return'). */
+  group?: string;
 }
 
 export type TrackStyle = 'wood' | 'tubular' | 'boxspine' | 'mine';

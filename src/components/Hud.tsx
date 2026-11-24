@@ -7,10 +7,9 @@ import { G0 } from '../engine/physics/train-sim';
 
 const NAV: Array<{ id: Exclude<Panel, 'none'>; label: string; icon: string }> = [
   { id: 'build', label: 'Build', icon: 'build' },
-  { id: 'train', label: 'Train', icon: 'train' },
-  { id: 'style', label: 'Style', icon: 'style' },
-  { id: 'scenery', label: 'Scenery', icon: 'scenery' },
-  { id: 'weather', label: 'Weather', icon: 'weather' },
+  { id: 'decorate', label: 'Decorate', icon: 'scenery' },
+  { id: 'paint', label: 'Paint', icon: 'style' },
+  { id: 'sky', label: 'Sky', icon: 'sun' },
   { id: 'ride', label: 'Ride', icon: 'ride' },
 ];
 
@@ -18,34 +17,19 @@ export function TopBar() {
   const canUndo = useGame((s) => s.past.length > 0);
   const canRedo = useGame((s) => s.future.length > 0);
   const name = useGame((s) => s.coasterName);
-  const saveStatus = useGame((s) => s.saveStatus);
   const camera = useGame((s) => s.camera);
   const g = useGame.getState;
   return (
     <header className="cc-top">
-      <button className="cc-title" onClick={() => (ui('open'), useGame.setState({ overlay: 'saves' }))} aria-label={`${name}. Open saved parks`}>
-        <span className="cc-title-name">{name}</span>
-        <span className={`cc-save-dot ${saveStatus}`} aria-hidden="true" />
-        <span className="sr-only">Save status: {saveStatus}</span>
-      </button>
+      <div className="cc-top-left">
+        <IconButton icon="menu" label="Menu: parks, sound and settings" variant="solid" onClick={() => (ui('open'), useGame.setState({ overlay: 'menu' }))} />
+        <span className="cc-coaster-name">{name}</span>
+      </div>
       <div className="cc-top-right">
-        <div className="cc-pill-group" role="group" aria-label="History">
+        {camera !== 'orbit' && <IconButton icon="frame" label="Back to the overview" variant="solid" onClick={() => useGame.setState({ camera: 'orbit' })} />}
+        <div className="cc-pill-group" role="group" aria-label="Undo and redo">
           <IconButton icon="undo" label="Undo" shortcut="Ctrl+Z" disabled={!canUndo} onClick={() => (ui('undo'), g().undo())} />
           <IconButton icon="redo" label="Redo" shortcut="Ctrl+Shift+Z" disabled={!canRedo} onClick={() => (ui('redo'), g().redo())} />
-        </div>
-        <div className="cc-pill-group" role="group" aria-label="View">
-          {camera !== 'orbit' ? (
-            <IconButton icon="frame" label="Back to build view" shortcut="Esc" onClick={() => useGame.setState({ camera: 'orbit' })} />
-          ) : (
-            <IconButton icon="frame" label="Frame the coaster" shortcut="F" onClick={() => services.engine?.frameCoaster()} />
-          )}
-          <span className="cc-narrow-hide">
-            <IconButton icon="camera" label="Photo mode" shortcut="P" onClick={() => useGame.setState({ overlay: 'photo', panel: 'none' })} />
-          </span>
-          <span className="cc-narrow-hide">
-            <IconButton icon="leaf" label="Relax mode" shortcut="R" onClick={() => useGame.setState({ overlay: 'relax', panel: 'none', camera: 'relax' })} />
-          </span>
-          <IconButton icon="settings" label="Settings" onClick={() => (ui('open'), useGame.setState({ overlay: 'settings' }))} />
         </div>
       </div>
     </header>
@@ -56,7 +40,7 @@ export function BottomNav() {
   const panel = useGame((s) => s.panel);
   const index = NAV.findIndex((n) => n.id === panel);
   return (
-    <nav className="cc-nav" aria-label="Main tools" style={{ ['--i' as string]: Math.max(0, index), ['--n' as string]: NAV.length }}>
+    <nav className="cc-nav" aria-label="Modes" style={{ ['--i' as string]: Math.max(0, index), ['--n' as string]: NAV.length }}>
       <span className={`cc-nav-indicator${index < 0 ? ' hidden' : ''}`} aria-hidden="true" />
       {NAV.map((n) => (
         <button
@@ -66,16 +50,15 @@ export function BottomNav() {
           aria-label={n.label}
           title={n.label}
           onClick={() => {
-            ui(panel === n.id ? 'close' : 'open');
             const next = panel === n.id ? 'none' : n.id;
+            ui(next === 'none' ? 'close' : 'open');
+            const cam = useGame.getState().camera;
             useGame.setState({
               panel: next,
-              previewActive: next === 'build',
-              selectedNode: null,
               sceneryTool: null,
               brush: null,
-              sheetCompact: false,
-              ...(next === 'ride' ? {} : useGame.getState().camera === 'relax' ? { camera: 'orbit' as const } : {}),
+              eraser: false,
+              ...(next !== 'ride' && cam !== 'orbit' ? { camera: 'orbit' as const } : {}),
             });
           }}
         >
@@ -112,18 +95,6 @@ export function Toasts() {
           </button>
         </div>
       ))}
-    </div>
-  );
-}
-
-export function Hint() {
-  const hint = useGame((s) => s.hint);
-  const panel = useGame((s) => s.panel);
-  if (!hint || panel !== 'build') return null;
-  return (
-    <div className="cc-hint" role="note">
-      <Icon name="info" size={18} />
-      <span>{hint}</span>
     </div>
   );
 }

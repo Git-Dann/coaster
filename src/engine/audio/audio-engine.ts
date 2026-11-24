@@ -16,8 +16,9 @@ import { RateLimiter, SmoothParam, VoiceLimiter, clamp01, createNoiseBank, type 
 
 export type { BuildMaterial, BuildSound, CoasterAudioState, EnvironmentAudioState, UiSound, Volumes } from './types';
 export { RateLimiter, VoiceLimiter } from './synth';
+export { MUSIC_MAX_VOICES } from './music';
 
-/** Max concurrent one-shot voices (UI, build, clacks, bird phrases, droplets, music phrases). */
+/** Max concurrent one-shot voices (UI, build, clacks, bird phrases, droplets). Music has its own cap (MUSIC_MAX_VOICES). */
 export const MAX_VOICES = 24;
 
 /** Minimum ms between repeats of the same sound; continuous drags never machine-gun. */
@@ -32,7 +33,7 @@ export const RATE_LIMITS: Readonly<Record<string, number>> = {
 const DEFAULT_RATE_MS = 25;
 
 /** Per-bus trims keep overall loudness modest and the families balanced at equal user volumes. */
-const BUS_TRIM = { ui: 0.55, construction: 0.6, coaster: 0.7, environment: 0.55, music: 0.4 } as const;
+const BUS_TRIM = { ui: 0.55, construction: 0.6, coaster: 0.7, environment: 0.55, music: 0.55 } as const;
 type BusName = keyof typeof BUS_TRIM;
 const BUS_NAMES: readonly BusName[] = ['ui', 'construction', 'coaster', 'environment', 'music'];
 
@@ -146,14 +147,14 @@ export class AudioEngine {
       buses[name] = g;
       busLevels[name] = new SmoothParam(g.gain, VOLUME_TC, this.busTarget(name));
     }
-    this.music = new Music(ctx, noise, buses.music, this.voices);
+    this.music = new Music(ctx, noise, buses.music);
     this.music.setEnabled(this.musicOn);
     return { ctx, noise, master, masterLevel, buses, busLevels };
   }
 
   private busTarget(name: BusName): number {
-    const gate = name === 'music' && !this.musicOn ? 0 : 1;
-    return this.volumes[name] * BUS_TRIM[name] * gate;
+    // Music fades itself in/out (and stops scheduling) when toggled, so its bus is not gated here.
+    return this.volumes[name] * BUS_TRIM[name];
   }
 
   /** The graph if sound can be played right now, else null. */
@@ -269,6 +270,7 @@ export class AudioEngine {
       this.coaster?.dispose();
       this.ambience?.dispose();
       this.growth?.dispose();
+      this.music?.dispose();
     } catch (err) {
       console.warn('[audio] dispose failed', err);
     }
