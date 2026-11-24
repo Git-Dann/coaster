@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
 const buildId = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);

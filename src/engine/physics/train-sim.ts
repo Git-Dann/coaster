@@ -109,7 +109,6 @@ export class TrainSim {
   private stallTimer = 0;
   private stallReported = false;
   private lastGoodS = 0;
-  private lastGoodV = 0;
   private prevGVert = 1;
   private readonly smp: TrackSample = newSample();
   private readonly gv: V3 = v3();
@@ -182,7 +181,6 @@ export class TrainSim {
     }
     this.prevS = this.s;
     this.lastGoodS = this.s;
-    this.lastGoodV = 0;
     this.updateCars();
     this.updateTelemetry(0, 0);
   }
@@ -390,7 +388,6 @@ export class TrainSim {
     this.s = s1;
     this.v = v1;
     this.lastGoodS = s1;
-    this.lastGoodV = v1;
 
     // Unfinished end of an open track: stop gently once the buffer has done its job.
     if (!this.track.closed) {

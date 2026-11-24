@@ -1,6 +1,6 @@
 import type { V3 } from '../core/vec3';
 import { appendElement } from './design-ops';
-import { type Cursor, type ElementResult, drop, hill, liftHill, piece, straight, helix } from './elements';
+import { type Cursor, type ElementResult, drop, hill, liftHill, piece, straight } from './elements';
 import type { TrackDesign } from './types';
 
 /**

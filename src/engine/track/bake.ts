@@ -100,7 +100,7 @@ export class BakedTrack {
       const seg = segs[si]!;
       const table = new Float64Array(SUBDIV + 1);
       let acc = 0;
-      let prevSpeed = 0;
+      let prevSpeed: number;
       evalSegment(seg, 0, null, d, null);
       prevSpeed = len(d);
       for (let k = 1; k <= SUBDIV; k++) {
