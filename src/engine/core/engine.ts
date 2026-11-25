@@ -460,14 +460,15 @@ export class Engine {
   }
 
   /** Screen space covered by the interface (top bar, build sheet, nav), in CSS pixels. */
-  private insets = { top: 0, bottom: 0 };
+  private insets = { top: 0, bottom: 0, left: 0, right: 0 };
   private appliedOffset = NaN;
+  private appliedOffsetX = NaN;
   /**
    * Tell the camera which parts of the screen the controls cover. Overview cameras then centre
    * what they look at in the clear area between them, instead of behind the build sheet.
    */
-  setViewInsets(top: number, bottom: number): void {
-    this.insets = { top: Math.max(0, top), bottom: Math.max(0, bottom) };
+  setViewInsets(top: number, bottom: number, left = 0, right = 0): void {
+    this.insets = { top: Math.max(0, top), bottom: Math.max(0, bottom), left: Math.max(0, left), right: Math.max(0, right) };
   }
 
   /** Shift the projection so the camera's aim point sits in the middle of the clear area. */
@@ -477,19 +478,17 @@ export class Engine {
     const h = Math.max(1, this.canvas.clientHeight);
     const overview = this.rig.mode === 'orbit' || this.rig.mode === 'relax';
     // Ease towards the target offset so opening or closing a sheet glides rather than jumps.
-    const target = overview ? Math.round((this.insets.bottom - this.insets.top) / 2) : 0;
-    const cur = Number.isFinite(this.appliedOffset) ? this.appliedOffset : target;
-    const next = Math.abs(target - cur) < 0.5 ? target : cur + (target - cur) * 0.15;
-    if (next === this.appliedOffset) return;
-    this.appliedOffset = next;
-    if (Math.abs(next) < 0.5) cam.clearViewOffset();
-    else cam.setViewOffset(w, h, 0, next, w, h);
-  }
-
-  /** Height of the clear area between the controls, as a fraction of the screen. */
-  private clearFraction(): number {
-    const h = Math.max(1, this.canvas.clientHeight);
-    return Math.max(0.3, (h - this.insets.top - this.insets.bottom) / h);
+    const ty = overview ? Math.round((this.insets.bottom - this.insets.top) / 2) : 0;
+    const tx = overview ? Math.round((this.insets.right - this.insets.left) / 2) : 0;
+    const cy = Number.isFinite(this.appliedOffset) ? this.appliedOffset : ty;
+    const cx = Number.isFinite(this.appliedOffsetX) ? this.appliedOffsetX : tx;
+    const ny = Math.abs(ty - cy) < 0.5 ? ty : cy + (ty - cy) * 0.15;
+    const nx = Math.abs(tx - cx) < 0.5 ? tx : cx + (tx - cx) * 0.15;
+    if (ny === this.appliedOffset && nx === this.appliedOffsetX) return;
+    this.appliedOffset = ny;
+    this.appliedOffsetX = nx;
+    if (Math.abs(ny) < 0.5 && Math.abs(nx) < 0.5) cam.clearViewOffset();
+    else cam.setViewOffset(w, h, nx, ny, w, h);
   }
 
   /** Smoothly move the build camera to look at a point, keeping the current zoom. */
@@ -512,17 +511,72 @@ export class Engine {
       this.rig.pitch = 0.36;
       return;
     }
-    const box = new THREE.Box3();
-    for (let i = 0; i < t.count; i += 8) box.expandByPoint(this.tmp.set(t.pos[i * 3]!, t.pos[i * 3 + 1]!, t.pos[i * 3 + 2]!));
+    // Sample the circuit, find its centre and its long direction in plan view.
+    const pts: THREE.Vector3[] = [];
+    for (let i = 0; i < t.count; i += 8) pts.push(new THREE.Vector3(t.pos[i * 3]!, t.pos[i * 3 + 1]!, t.pos[i * 3 + 2]!));
+    const box = new THREE.Box3().setFromPoints(pts);
     const c = box.getCenter(new THREE.Vector3());
-    const radius = box.getSize(new THREE.Vector3()).length() / 2;
-    // Fit the coaster's bounding sphere into the clear area between the controls, using whichever
-    // of the horizontal or (clear) vertical field of view is narrower.
-    const aspect = this.canvas.clientWidth / Math.max(1, this.canvas.clientHeight);
-    const tanV = Math.tan(THREE.MathUtils.degToRad(this.rig.camera.fov) / 2);
-    const tanFit = Math.min(tanV * this.clearFraction(), tanV * aspect);
-    if (aspect < 1) this.rig.pitch = 0.62; // portrait: look down more so the length fits the tall screen
-    this.rig.focusOn(c, Math.max(30, radius / Math.sin(Math.atan(tanFit))));
+    let sxx = 0;
+    let szz = 0;
+    let sxz = 0;
+    for (const p of pts) {
+      const dx = p.x - c.x;
+      const dz = p.z - c.z;
+      sxx += dx * dx;
+      szz += dz * dz;
+      sxz += dx * dz;
+    }
+    const axis = 0.5 * Math.atan2(2 * sxz, sxx - szz); // angle of the long axis from +x
+    const ux = Math.cos(axis);
+    const uz = Math.sin(axis);
+    const w = Math.max(1, this.canvas.clientWidth);
+    const h = Math.max(1, this.canvas.clientHeight);
+    const portrait = w < h;
+    // Portrait screens are tall: look along the long axis so it runs up the screen. Wide screens
+    // look across it. Of the two opposite views, keep the one nearest the current view.
+    let yaw = Math.atan2(ux, uz) + (portrait ? 0 : Math.PI / 2);
+    const near = (a: number) => Math.abs(Math.atan2(Math.sin(a - this.rig.yaw), Math.cos(a - this.rig.yaw)));
+    if (near(yaw + Math.PI) < near(yaw)) yaw += Math.PI;
+    const pitch = portrait ? 0.62 : Math.max(0.42, this.rig.pitch);
+    // Find the closest distance at which every sampled point lands inside the clear area.
+    const cam = this.rig.camera.clone();
+    cam.aspect = w / h;
+    const oy = Math.round((this.insets.bottom - this.insets.top) / 2);
+    const ox = Math.round((this.insets.right - this.insets.left) / 2);
+    if (oy || ox) cam.setViewOffset(w, h, ox, oy, w, h);
+    else cam.clearViewOffset();
+    cam.updateProjectionMatrix();
+    const m = Math.min(w, h) * 0.06;
+    const left = this.insets.left + m;
+    const right = w - this.insets.right - m;
+    const top = this.insets.top + m;
+    const bottom = h - this.insets.bottom - m;
+    const v = new THREE.Vector3();
+    const fits = (d: number) => {
+      const cp = Math.cos(pitch);
+      cam.position.set(c.x + Math.sin(yaw) * cp * d, c.y + Math.sin(pitch) * d, c.z + Math.cos(yaw) * cp * d);
+      cam.up.set(0, 1, 0);
+      cam.lookAt(c);
+      cam.updateMatrixWorld();
+      for (const p of pts) {
+        v.copy(p).project(cam);
+        const sx = ((v.x + 1) / 2) * w;
+        const sy = ((1 - v.y) / 2) * h;
+        if (v.z > 1 || sx < left || sx > right || sy < top || sy > bottom) return false;
+      }
+      return true;
+    };
+    let lo = 25;
+    let hi = this.rig.maxDistance;
+    if (fits(lo)) hi = lo;
+    else for (let k = 0; k < 18; k++) {
+      const mid = (lo + hi) / 2;
+      if (fits(mid)) hi = mid;
+      else lo = mid;
+    }
+    this.rig.yaw = yaw;
+    this.rig.pitch = pitch;
+    this.rig.focusOn(c, hi);
   }
 
   // ---------------------------------------------------------------- picking
@@ -738,7 +792,7 @@ export class Engine {
 
     // Atmosphere and weather.
     // Pulling far back to see a big coaster must not bury it in haze: thin the fog with distance.
-    const viewDist = this.rig.mode === 'orbit' || this.rig.mode === 'relax' ? this.rig.distance * 2.4 : 0;
+    const viewDist = this.rig.mode === 'orbit' || this.rig.mode === 'relax' ? this.rig.distance * 3.2 : 0;
     this.atmosphere.baseFog = 1.25 / Math.max(this.terrain.drawDistance, 620, viewDist);
     this.atmosphere.update(dt, this.elapsed, focus);
     const st = this.atmosphere.state;

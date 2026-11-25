@@ -65,11 +65,20 @@ export function App() {
       if (!e) return;
       const c = canvas.getBoundingClientRect();
       const top = document.querySelector('.cc-top')?.getBoundingClientRect();
-      const dock = document.querySelector('.cc-dock')?.getBoundingClientRect();
-      // Only count the dock when it spans the bottom of the screen (phones); on wide screens the
-      // sheet sits beside the view.
-      const dockCovers = dock && dock.width > c.width * 0.6 ? c.bottom - dock.top : 0;
-      e.setViewInsets(top ? top.bottom - c.top : 0, dockCovers);
+      const rect = (sel: string) => {
+        const el = document.querySelector(sel);
+        const r = el?.getBoundingClientRect();
+        return r && r.width > 0 && r.height > 0 ? r : null;
+      };
+      const tray = rect('.cc-tray');
+      const nav = rect('.cc-nav');
+      const lever = rect('.cc-lever');
+      let bottom = nav ? c.bottom - nav.top : 0;
+      let left = 0;
+      if (tray && tray.width > c.width * 0.6) bottom = c.bottom - tray.top; // phone: sheet across the bottom
+      else if (tray && tray.left < c.width * 0.2 && tray.height > c.height * 0.4) left = tray.right - c.left; // landscape: sheet on the left
+      else if (tray) bottom = Math.max(bottom, c.bottom - tray.top); // desktop: sheet above the nav
+      e.setViewInsets(top ? top.bottom - c.top : 0, bottom, left, lever ? c.right - lever.left : 0);
     };
     const insetObserver = new ResizeObserver(measureInsets);
     const watchInsets = window.setInterval(() => {
