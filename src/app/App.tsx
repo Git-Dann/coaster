@@ -141,6 +141,8 @@ export function App() {
       const t = e.target as HTMLElement;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
       const g = useGame.getState();
+      // Nothing works until a choice is made on the opening menu.
+      if (g.overlay === 'welcome') return;
       const mod = e.ctrlKey || e.metaKey;
       if (mod && e.key.toLowerCase() === 'z') {
         e.preventDefault();
@@ -167,7 +169,7 @@ export function App() {
       if (mod) return;
       switch (e.key) {
         case 'Escape':
-          if (g.overlay !== 'none' && g.overlay !== 'welcome') useGame.setState({ overlay: 'none', camera: g.camera === 'relax' ? 'orbit' : g.camera });
+          if (g.overlay !== 'none') useGame.setState({ overlay: 'none', camera: g.camera === 'relax' ? 'orbit' : g.camera });
           else if (g.camera !== 'orbit') {
             useGame.setState({ camera: 'orbit' });
             services.engine?.viewNearTrain();
@@ -241,7 +243,8 @@ export function App() {
     <div className={`cc-app${camera !== 'orbit' ? ' riding' : ''}`}>
       <canvas ref={canvasRef} className="cc-canvas" aria-label="Coaster world. Drag to look around, pinch or scroll to zoom." tabIndex={0} />
       {!ready && <div className="cc-loading">Unpacking the meadow…</div>}
-      {ready && !immersive && (
+      {ready && overlay === 'welcome' && <Welcome />}
+      {ready && !immersive && overlay !== 'welcome' && (
         <>
           <TopBar />
           <Telemetry />
@@ -253,7 +256,6 @@ export function App() {
             {panel === 'ride' && <RideTray />}
             <BottomNav />
           </div>
-          {overlay === 'welcome' && <Welcome />}
           {overlay === 'menu' && <MenuDialog />}
           {overlay === 'settings' && <SettingsDialog />}
           {overlay === 'saves' && <SavesDialog />}
