@@ -260,10 +260,23 @@ export function SettingsDialog() {
           </>
         )}
         {tab === 'about' && (
-          <div className="cc-p">
-            <p>Cozy Coaster is a calm coaster sandbox. Your creations are saved in this browser only, which can be cleared by the browser. Export a save file from the parks list to keep a copy.</p>
-            <p>All sounds are synthesised in your browser. The train physics is a simplified, documented model for fun, not a certified engineering or ride safety tool.</p>
-            <p className="small">Build {__BUILD_ID__}</p>
+          <div className="cc-about">
+            <div className="cc-about-head">
+              <img src="/icons/icon.svg" alt="" width={64} height={64} />
+              <div>
+                <h3>Cozy Coaster</h3>
+                <p>Build it, ride it, take it slow.</p>
+              </div>
+            </div>
+            <p>A little world for building roller coasters at your own pace. No scores, no timers, nothing to lose. Lay some track, plant a few trees, then sit back and watch the train roll over the hills.</p>
+            <p>Every sound is made live in your browser, and the train follows real physics, simplified for fun (it's a toy, not an engineering tool).</p>
+            <p className="cc-about-note">Your coasters are saved in this browser. To keep a copy safe, export a save file from the parks list.</p>
+            <div className="cc-about-thanks" aria-label="Thank you">
+              <h4>With thanks</h4>
+              <p className="lead">To Oliver &amp; George</p>
+              <p>And to Eloise, Megan, Talia, Arlo &amp; Cooper</p>
+            </div>
+            <p className="cc-about-build">Build {__BUILD_ID__}</p>
           </div>
         )}
       </div>
