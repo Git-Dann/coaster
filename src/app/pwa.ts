@@ -10,11 +10,15 @@ export function registerServiceWorker(): void {
   window.addEventListener('load', async () => {
     try {
       const reg = await navigator.serviceWorker.register('/sw.js');
+      // Only reload when the player tapped "Update". The first install also changes the
+      // controller (the worker claims the page), and that must never reload a fresh visit.
+      let updateAccepted = false;
       const offer = (worker: ServiceWorker) => {
         useGame.getState().toast('A fresh version of Cozy Coaster is ready.', {
           label: 'Update',
           run: async () => {
             await saves.flush();
+            updateAccepted = true;
             worker.postMessage({ type: 'SKIP_WAITING' });
           },
         });
@@ -29,7 +33,7 @@ export function registerServiceWorker(): void {
       });
       let reloading = false;
       navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (reloading) return;
+        if (reloading || !updateAccepted) return;
         reloading = true;
         location.reload();
       });
