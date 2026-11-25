@@ -131,9 +131,9 @@ async function run(devName, devOpts) {
     return (await loc.count()) > 0 && (await loc.isVisible().catch(() => false));
   };
   // An offered option must be addable: Add enabled once its ghost is planned.
-  const addOffered = async () => {
+  const addOffered = async (label = 'Add piece') => {
     await page.waitForFunction(() => { const s = window.__cozy.store.getState(); return s.ghost?.forChoice === JSON.stringify(s.buildChoice); }, null, { timeout: 20000 }).catch(() => {});
-    const add = btn('Add piece');
+    const add = btn(label);
     if (await add.isDisabled()) note(ctx, `offered option can't be added: ${await page.evaluate(() => window.__cozy.store.getState().ghost?.blocked)}`);
     else await add.click();
   };
@@ -169,8 +169,13 @@ async function run(devName, devOpts) {
   }
   // Edit existing pieces: step back, change one, remove one, back to the end.
   await step('select previous piece', async () => { await btn('Previous piece').click(); await btn('Previous piece').click(); }, 1200);
-  await step('change selected to Hill', () => btn('Hill').click(), 1200);
-  await step('apply change', () => btn('Apply change').click(), 1200);
+  // Change it to whatever special the panel offers there (only offered options are tapped).
+  for (const pick of ['Hill', 'Brakes', 'Launch', 'Turn left']) {
+    if (!(await offered(pick))) continue;
+    await step(`change selected to ${pick}`, () => btn(pick).click(), 1200);
+    await step('apply change', () => addOffered('Apply change'), 1200);
+    break;
+  }
   await step('remove selected piece', () => btn('Remove this piece').click(), 1200);
   await step('go to end', () => btn('Go to end').click(), 1200);
   // Keyboard building (laptops): arrows choose, Enter adds, Backspace removes.
