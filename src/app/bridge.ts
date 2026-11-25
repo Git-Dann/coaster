@@ -3,7 +3,7 @@ import type { SimEvent } from '../engine/physics/train-sim';
 import type { V3 } from '../engine/core/vec3';
 import { useGame } from '../stores/game';
 import { planDragToPiece } from '../features/builder/builder';
-import { addPiece, adjustPiece, clampParam, pieceById, removePiece, type PieceId } from '../features/builder/simple-builder';
+import { addPiece, adjustPiece, clampParam, pieceById, planNext, removePiece, type BuildChoice, type NextPiece, type PieceId } from '../features/builder/simple-builder';
 import { TIMBER_STYLES } from '../engine/supports/support-gen';
 import type { TrackDesign } from '../engine/track/types';
 import { newItemId } from '../features/saves';
@@ -65,6 +65,72 @@ export function tapPiece(id: PieceId): void {
   const end = r.design.nodes[r.design.nodes.length - 1];
   if (end) services.engine?.lookAt(end.p);
   announce(`${pieceById(id).label} added.`);
+}
+
+// ------------------------------------------------------------------ edit mode
+
+let ghostPlan: NextPiece | null = null;
+let ghostRaf = 0;
+
+/**
+ * Edit mode shows the next piece as a see-through ghost at the end of the track. Nothing changes
+ * until "Add piece" commits it (one undo step).
+ */
+export function refreshGhost(): void {
+  cancelAnimationFrame(ghostRaf);
+  ghostRaf = requestAnimationFrame(() => {
+    const g = useGame.getState();
+    const e = services.engine;
+    if (!e) return;
+    if (g.panel !== 'build') {
+      ghostPlan = null;
+      e.setPreview(null);
+      if (g.ghost) useGame.setState({ ghost: null });
+      return;
+    }
+    try {
+      ghostPlan = planNext(g.design, g.buildChoice, ground, e.track);
+    } catch (err) {
+      // Never let a planning problem break the game: just show no ghost for this choice.
+      console.warn('Could not plan the next piece', err);
+      ghostPlan = null;
+    }
+    if (!ghostPlan) {
+      e.setPreview(null);
+      useGame.setState({ ghost: null });
+      return;
+    }
+    const nodes = ghostPlan.design.nodes;
+    const end = nodes[nodes.length - 1]!;
+    const from = nodes[ghostPlan.start - 1] ?? end;
+    e.setPreview(ghostPlan.design);
+    // The grid stays invisible: pieces snap to it, but players only see the ghost.
+    // Keep both the end of the track and the ghost in view.
+    // Close enough to read the ghost clearly, far enough to see the track around it.
+    e.lookAt([(from.p[0] + end.p[0]) / 2, (from.p[1] + end.p[1]) / 2, (from.p[2] + end.p[2]) / 2], choiceDistance(g.buildChoice));
+    useGame.setState({ ghost: { height: ghostPlan.height, atGround: ghostPlan.atGround, crossing: ghostPlan.crossing } });
+  });
+}
+
+/** Camera distance for the edit view: specials are taller, so stand back a little. */
+function choiceDistance(c: BuildChoice): number {
+  return c.kind === 'special' ? 62 : 46;
+}
+
+/** Choose what the next piece will be (the ghost updates). */
+export function chooseBuild(c: BuildChoice): void {
+  ui('select');
+  useGame.setState({ buildChoice: c });
+}
+
+/** Build the ghost piece. */
+export function addGhost(): void {
+  const g = useGame.getState();
+  const plan = ghostPlan ?? planNext(g.design, g.buildChoice, ground, services.engine?.track);
+  if (!plan) return;
+  g.commitDesign(plan.design);
+  services.engine?.audio.build(material(plan.design), 'place');
+  announce('Piece added.');
 }
 
 let pending: Record<string, number> | null = null;
@@ -203,7 +269,8 @@ function syncHandles(engine: Engine): void {
   const building = g.panel === 'build';
   engine.buildMode = building;
   const last = g.design.nodes[g.design.nodes.length - 1];
-  engine.setHandles({ end: building && last ? last.p : null, dir: last?.dir ?? null, visible: building && !!last });
+  // Edit mode uses the ghost and the construction panel; the old drag ring stays hidden.
+  engine.setHandles({ end: building && last ? last.p : null, dir: last?.dir ?? null, visible: false });
 }
 
 export function connectStore(engine: Engine): () => void {
@@ -238,6 +305,9 @@ export function connectStore(engine: Engine): () => void {
     if (s.playback !== p.playback) engine.loop.timeScale = s.playback;
     engine.brushActive = s.panel === 'decorate' && !!s.brush;
     if (s.design !== p.design || s.panel !== p.panel) syncHandles(engine);
+    // Edit mode: the train waits in the station, and the ghost follows every change.
+    if (s.panel !== p.panel && (s.panel === 'build' || p.panel === 'build')) engine.holdTrain(s.panel === 'build');
+    if (s.panel === 'build' || p.panel === 'build') if (s.design !== p.design || s.panel !== p.panel || s.buildChoice !== p.buildChoice) refreshGhost();
   });
   syncHandles(engine);
   return unsub;

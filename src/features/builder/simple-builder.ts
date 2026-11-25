@@ -1,8 +1,9 @@
 import type { V3 } from '../../engine/core/vec3';
 import { BakedTrack } from '../../engine/track/bake';
 import { appendElement, cloneDesign, liftAboveGround, removeLastPiece, uprightBankAtEnd } from '../../engine/track/design-ops';
-import type { TrackDesign } from '../../engine/track/types';
-import { MIN_VERTICAL, findClashes, separateCrossings } from '../../engine/track/clearance';
+import type { TrackDesign, TrackNode } from '../../engine/track/types';
+import { MIN_VERTICAL, PLAN_RADIUS, findClashes, separateCrossings } from '../../engine/track/clearance';
+import { LEVEL, TILE, gridFrame, gridTarget, onGrid, pathTo, snapLevel, type GridFrame } from '../../engine/track/grid';
 import { estimateSpeedAtEnd, presetById, type PresetId } from './builder';
 
 /**
@@ -181,12 +182,127 @@ export function opened(d: TrackDesign): TrackDesign {
   return d.closed ? { ...cloneDesign(d), closed: false } : d;
 }
 
-export function addPiece(design: TrackDesign, id: PieceId, ground: (x: number, z: number) => number): { design: TrackDesign; active: ActivePiece } {
+export function addPiece(design: TrackDesign, id: PieceId, ground: (x: number, z: number) => number, params?: Record<string, number>): { design: TrackDesign; active: ActivePiece } {
   const base = opened(design);
   const piece = pieceById(id);
   const group = newGroup();
-  const next = generate(base, piece, piece.params, group, ground);
+  const next = generate(base, piece, { ...piece.params, ...params }, group, ground);
   return { design: next.design, active: { piece: id, group, start: base.nodes.length, params: next.params } };
+}
+
+// ------------------------------------------------------------------ edit mode (construction)
+
+export type Turn = -1 | 0 | 1;
+export type Slope = -1 | 0 | 1;
+/** What the next piece will be: plain track (direction + slope) or a special element. */
+export type BuildChoice = { kind: 'track'; turn: Turn; slope: Slope } | { kind: 'special'; id: PieceId };
+
+export const DEFAULT_CHOICE: BuildChoice = { kind: 'track', turn: 0, slope: 0 };
+/** Special elements offered in edit mode (plain track comes from direction + slope). */
+export const SPECIALS: PieceId[] = ['hill', 'lift', 'drop', 'loop', 'roll', 'corkscrew', 'helix', 'brakes', 'launch'];
+
+export interface NextPiece {
+  design: TrackDesign;
+  /** Index of the first node of the new piece. */
+  start: number;
+  /** End of the new piece above the ground, metres. */
+  height: number;
+  /** A downward piece that couldn't go down because the track is already at the ground. */
+  atGround: boolean;
+  /** Committed track passing above or below the new piece, if any (clear gap in metres). */
+  crossing: { above: boolean; gap: number } | null;
+}
+
+/**
+ * Plan the next piece for the current choice without committing anything: the edit-mode ghost.
+ * Committing is just using `design` as the new design (one undo step).
+ */
+export function planNext(design: TrackDesign, choice: BuildChoice, ground: (x: number, z: number) => number, committed?: BakedTrack | null): NextPiece {
+  const base = opened(design);
+  const g = gridFrame(base);
+  const group = newGroup();
+  const d = cloneDesign(base);
+  d.closed = false;
+  const start = d.nodes.length;
+  const speed = d.nodes.length >= 2 ? estimateSpeedAtEnd(d, new BakedTrack(d, 0.5)) : 8;
+  const headingOf = (dir: readonly number[]) => Math.atan2(-dir[2]!, dir[0]!);
+  const floorAt = (x: number, z: number) => ground(x, z) + 1.4;
+  const ceilLevel = (y: number) => g.y + Math.ceil((y - g.y) / LEVEL - 1e-6) * LEVEL;
+  const push = (nodes: TrackNode[]) => {
+    for (const n of nodes) d.nodes.push(n);
+  };
+  let serialId = 0;
+  const prefix = () => `${group}_${serialId++}_`;
+  let atGround = false;
+  // The automatic return always arrives along a straight brake run into the station: treat that
+  // approach as existing track, so new track (and elements) keep clear of it.
+  const first = d.nodes[0]!;
+  const approach: TrackNode = { id: 'approach', p: [first.p[0] - first.dir[0] * 40, first.p[1], first.p[2] - first.dir[2] * 40], dir: [...first.dir] as V3, bank: 0, kind: 'track' };
+  // 1. Track that ends off the grid (older coasters, or after a special piece) first joins it.
+  const tail = () => d.nodes[d.nodes.length - 1]!;
+  if (!onGrid(g, tail().p, tail().dir)) {
+    const t = tail();
+    const target = gridTarget(g, { x: t.p[0], z: t.p[2], h: headingOf(t.dir) }, 2, 0, 0);
+    push(pathTo(t, target, { y1: Math.max(snapLevel(g, t.p[1]), ceilLevel(floorAt(target.x, target.z))), radius: 10, speed }, prefix(), group));
+  }
+  if (choice.kind === 'track') {
+    // 2. Plain track: two tiles straight, or a quarter turn of radius two tiles; 4 m per climb.
+    const t = tail();
+    const target = gridTarget(g, { x: t.p[0], z: t.p[2], h: headingOf(t.dir) }, 2, choice.turn * 2, choice.turn);
+    let y1 = snapLevel(g, t.p[1]) + choice.slope * 2 * LEVEL;
+    const floor = ceilLevel(Math.max(floorAt(target.x, target.z), floorAt((t.p[0] + target.x) / 2, (t.p[2] + target.z) / 2)));
+    if (y1 < floor) {
+      atGround = choice.slope < 0;
+      y1 = floor;
+    }
+    push(pathTo(t, target, { y1, radius: choice.turn ? 2 * TILE : 10, speed }, prefix(), group));
+  } else {
+    // 3. A special element, then a short join back onto the grid.
+    const piece = pieceById(choice.id);
+    const made = generate({ ...d, nodes: [approach, ...d.nodes] }, piece, { ...piece.params }, group, ground).design;
+    d.nodes = made.nodes.slice(1);
+    const t = tail();
+    const target = gridTarget(g, { x: t.p[0], z: t.p[2], h: headingOf(t.dir) }, 2, 0, 0);
+    push(pathTo(t, target, { y1: Math.max(snapLevel(g, t.p[1]), ceilLevel(floorAt(target.x, target.z))), radius: 10, speed }, prefix(), group));
+  }
+  liftAboveGround(d, start, ground);
+  // Never through other track: simple track (including joins) is lifted smoothly over crossings;
+  // loops, rolls and other elements are never bent.
+  separateCrossings({ ...d, nodes: [approach, ...d.nodes] }, start + 1, ground);
+  const r = { design: d, active: { start } };
+  const nodes = d.nodes;
+  const end = nodes[nodes.length - 1]!;
+  const height = end.p[1] - ground(end.p[0], end.p[2]);
+  // Is there committed track above or below the new piece?
+  let crossing: NextPiece['crossing'] = null;
+  if (committed) {
+    const part = new BakedTrack({ ...r.design, closed: false, nodes: nodes.slice(Math.max(0, r.active.start - 1)) }, 1);
+    // Ignore where the new piece joins the track (and where the automatic return leaves it).
+    const joinS = committed.nodeS[Math.max(0, r.active.start - 1)] ?? 0;
+    for (let i = 6; i < part.count; i += 2) {
+      const x = part.pos[i * 3]!;
+      const y = part.pos[i * 3 + 1]!;
+      const z = part.pos[i * 3 + 2]!;
+      for (let j = 0; j < committed.count; j += 4) {
+        const sj = j * committed.ds;
+        // Only the player's own track: the automatic return re-plans itself around new pieces.
+        if (sj > joinS - 12) continue;
+        const dx = committed.pos[j * 3]! - x;
+        const dz = committed.pos[j * 3 + 2]! - z;
+        // Same footprint as the clash rule: only track really overhead (or underneath) counts.
+        if (dx * dx + dz * dz > PLAN_RADIUS * PLAN_RADIUS) continue;
+        const dy = committed.pos[j * 3 + 1]! - y;
+        if (Math.abs(dy) < 1 || Math.abs(dy) > 25) continue; // the joint itself, or far away
+        if (!crossing || Math.abs(dy) < crossing.gap) crossing = { above: dy > 0, gap: Math.abs(dy) };
+      }
+    }
+  }
+  return { design: r.design, start: r.active.start, height, atGround, crossing };
+}
+
+/** Where to draw the building grid: the grid frame and the snapped end of the track. */
+export function gridFor(design: TrackDesign): GridFrame {
+  return gridFrame(design);
 }
 
 /** Re-make the newest piece with changed parameters. Earlier track is untouched. */

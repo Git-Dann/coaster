@@ -68,15 +68,14 @@ async function audit(page, ctx) {
       // In build mode the newest piece's end must be visible in the clear area.
       const st = window.__cozy.store.getState();
       if (st.panel === 'build' && st.camera === 'orbit') {
-        const end = st.design.nodes[st.design.nodes.length - 1].p;
+        const pd = e.previewDesign;
+        const end = (pd ?? st.design).nodes[(pd ?? st.design).nodes.length - 1].p;
         const v = new (e.rig.camera.position.constructor)(end[0], end[1], end[2]).project(e.rig.camera);
         const sx = (v.x + 1) / 2 * innerWidth, sy = (1 - v.y) / 2 * innerHeight;
         const top = document.querySelector('.cc-top')?.getBoundingClientRect().bottom ?? 0;
         const dock = document.querySelector('.cc-dock')?.getBoundingClientRect();
         const bottom = dock && dock.width > innerWidth * 0.6 ? dock.top : innerHeight;
-        const lever = document.querySelector('.cc-lever')?.getBoundingClientRect();
-        const behindLever = lever && sx > lever.left - 10 && sy > lever.top && sy < lever.bottom;
-        if (sx < 10 || sx > innerWidth - 10 || sy < top || sy > bottom || behindLever) out.ui.push(`newest piece not in clear view (${Math.round(sx)},${Math.round(sy)})`);
+        if (sx < 10 || sx > innerWidth - 10 || sy < top || sy > bottom) out.ui.push(`newest piece (ghost) not in clear view (${Math.round(sx)},${Math.round(sy)})`);
       }
       out.track = { closed: t.closed, length: t.length, maxY, clash: worst, minClear, seamFlip: t.diagnostics.seamFlip, gap: t.diagnostics.maxGap, twist: maxTwist, cam: window.__cozy.store.getState().camera };
     }
@@ -126,31 +125,23 @@ async function run(devName, devOpts) {
   await step('menu open', () => btn(/^Menu/, false).click(), 900);
   await step('menu close', () => page.keyboard.press('Escape'), 600);
 
-  // Build: every piece, with lever and size changes
-  await step('build tab', () => btn('Build').click());
-  const pieces = ['Straight', 'Left', 'Right', 'Up', 'Down', 'Hill', 'Lift', 'Drop', 'Loop', 'Roll', 'Corkscrew', 'Spiral', 'Brakes', 'Launch'];
-  for (const p of pieces) {
-    await step(`add ${p}`, () => btn(p).click(), 900);
-    if (await page.getByRole('button', { name: 'Higher' }).isVisible().catch(() => false)) {
-      await step(`${p} higher x3`, async () => { for (let i = 0; i < 3; i++) await btn('Higher').click(); }, 600);
-      await step(`${p} lower x6`, async () => { for (let i = 0; i < 6; i++) await btn('Lower').click(); }, 600);
-    }
-    if (await page.getByRole('button', { name: 'Make it bigger' }).isEnabled().catch(() => false)) {
-      await step(`${p} bigger x2`, async () => { await btn('Make it bigger').click(); await btn('Make it bigger').click(); }, 600);
+  // Build (edit mode): every direction/slope combination and every special piece, each added.
+  await step('build tab', () => btn('Build').click(), 1200);
+  for (const dir of ['Straight', 'Turn left', 'Turn right']) {
+    for (const slope of ['Level', 'Up', 'Down']) {
+      await step(`choose ${dir} ${slope}`, async () => { await btn(dir).click(); await btn(slope).click(); }, 700);
+      await step(`add ${dir} ${slope}`, () => btn('Add piece').click(), 900);
     }
   }
-  // Drag the lever across its whole range.
-  await step('add Straight for lever drag', () => btn('Straight').click(), 800);
-  const slider = page.getByRole('slider').first();
-  if (await slider.isVisible().catch(() => false)) {
-    const b = await slider.boundingBox();
-    for (const f of [0.02, 0.5, 0.98, 0.3]) {
-      await step(`lever drag to ${f}`, async () => {
-        await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2); await page.mouse.down();
-        await page.mouse.move(b.x + b.width / 2, b.y + b.height * f, { steps: 6 }); await page.mouse.up();
-      }, 900);
-    }
+  for (const p of ['Hill', 'Lift', 'Drop', 'Loop', 'Roll', 'Corkscrew', 'Spiral', 'Brakes', 'Launch']) {
+    await step(`choose ${p}`, () => btn(p).click(), 900);
+    await step(`add ${p}`, () => btn('Add piece').click(), 1000);
   }
+  // Keyboard building (laptops): arrows choose, Enter adds, Backspace removes.
+  await step('keyboard build', async () => {
+    await page.mouse.click(5, 300);
+    for (const k of ['ArrowLeft', 'Enter', 'ArrowUp', 'Enter', 'ArrowRight', 'ArrowRight', 'Enter', 'Backspace']) await page.keyboard.press(k);
+  }, 1200);
   for (let i = 0; i < 4; i++) await step(`remove last ${i}`, () => btn('Remove the last piece').click(), 600);
   await step('undo', () => btn(/^Undo/, false).click());
   await step('redo', () => btn(/^Redo/, false).click());
@@ -213,8 +204,10 @@ async function run(devName, devOpts) {
   await step('after new coaster', async () => { const b = page.getByRole('button', { name: /Build your own|Start|blank|fresh/i }).first(); if (await b.isVisible().catch(() => false)) await b.click(); }, 2000);
 
   // Build again on a fresh coaster: a quick kid-style session.
-  await step('build tab 2', async () => { if (!(await btn('Straight').isVisible().catch(() => false))) await btn('Build').click(); });
-  for (const p of ['Left', 'Hill', 'Loop', 'Right', 'Spiral', 'Left', 'Drop', 'Up']) await step(`fresh add ${p}`, () => btn(p).click(), 900);
+  await step('build tab 2', async () => { if (!(await btn('Add piece').isVisible().catch(() => false))) await btn('Build').click(); });
+  for (const p of ['Turn left', 'Hill', 'Loop', 'Turn right', 'Spiral', 'Turn left', 'Drop', 'Straight']) {
+    await step(`fresh add ${p}`, async () => { await btn(p).click(); await btn('Add piece').click(); }, 900);
+  }
   await step('fresh overview', async () => { await page.evaluate(() => window.__cozy.engine.frameCoaster()); }, 1500);
   await step('fresh ride', async () => { await btn('Ride').click(); await btn('Ride!').click(); }, 4000);
   await browser.close();

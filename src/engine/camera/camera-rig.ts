@@ -108,7 +108,15 @@ export class CameraRig {
    * @param speed train speed (m/s) for subtle FOV breathing
    * @param ground terrain height lookup to keep cameras above ground
    */
-  update(dt: number, lead: THREE.Matrix4, rear: THREE.Matrix4, speed: number, ground: (x: number, z: number) => number): void {
+  update(
+    dt: number,
+    lead: THREE.Matrix4,
+    rear: THREE.Matrix4,
+    speed: number,
+    ground: (x: number, z: number) => number,
+    /** Watch cameras: is the train at the station, and the height of any track the camera would sit in. */
+    watch?: { inStation: boolean; stationSide: number; trackNear: (x: number, y: number, z: number) => number | null },
+  ): void {
     const k = 1 - Math.exp(-dt * (this.reducedMotion ? 6 : 10));
     const cam = this.camera;
     switch (this.mode) {
@@ -158,10 +166,16 @@ export class CameraRig {
         flatF.normalize();
         const side = new THREE.Vector3(-flatF.z, 0, flatF.x);
         let desired: THREE.Vector3;
-        if (this.mode === 'follow') desired = p.clone().addScaledVector(flatF, -14).add(new THREE.Vector3(0, 6, 0));
+        if (watch?.inStation) {
+          // At the station: low beside the platform (under the roof line), looking at the train.
+          desired = p.clone().addScaledVector(side, 9 * watch.stationSide).addScaledVector(flatF, -3).add(new THREE.Vector3(0, 2.2, 0));
+        } else if (this.mode === 'follow') desired = p.clone().addScaledVector(flatF, -14).add(new THREE.Vector3(0, 6, 0));
         else if (this.mode === 'side') desired = p.clone().addScaledVector(side, 12).add(new THREE.Vector3(0, 2.5, 0));
-        else desired = p.clone().addScaledVector(side, 38).addScaledVector(flatF, 18).add(new THREE.Vector3(0, 16, 0));
-        desired.y = Math.max(desired.y, ground(desired.x, desired.z) + 1.5);
+        else desired = p.clone().addScaledVector(side, 30).addScaledVector(flatF, 14).add(new THREE.Vector3(0, 10, 0));
+        const floor = ground(desired.x, desired.z) + 1.5;
+        desired.y = Math.max(desired.y, floor);
+        // Never sit inside other track: hop over it, or dip under it when there's room.
+        this.avoidTrack(desired, floor, watch?.trackNear);
         if (!this.rideInit) {
           this.ridePos.copy(desired);
           this.rideInit = true;
@@ -194,6 +208,17 @@ export class CameraRig {
     if (this.mode === 'orbit' || this.mode === 'relax') {
       const gy = ground(cam.position.x, cam.position.z) + 1.2;
       if (cam.position.y < gy) cam.position.y = gy;
+    }
+  }
+
+  /** Move a watch-camera position clear of any track it would sit in (above it, or below with room). */
+  private avoidTrack(p: THREE.Vector3, floor: number, trackNear?: (x: number, y: number, z: number) => number | null): void {
+    if (!trackNear) return;
+    for (let i = 0; i < 3; i++) {
+      const ty = trackNear(p.x, p.y, p.z);
+      if (ty === null) return;
+      const below = ty - 4.5;
+      p.y = p.y < ty && below >= floor ? below : ty + 4.5;
     }
   }
 

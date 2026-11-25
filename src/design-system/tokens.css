@@ -124,6 +124,19 @@ select {
   font: inherit;
   color: inherit;
 }
+/* Safari (notably on iPad) adds its own button padding and native styling, and lays inline SVGs on
+   the text baseline: both nudge icons off-centre. Reset them; classes set their own padding. */
+button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  line-height: 1;
+}
+button svg {
+  display: block;
+  flex-shrink: 0;
+}
 :focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 2px;

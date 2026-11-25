@@ -52,37 +52,61 @@ const connected = (page: Page) =>
   });
 const nodeCount = (page: Page) => page.evaluate(() => (window as any).__cozy.store.getState().design.nodes.length);
 
-test('build: tap pieces, adjust with the lever, remove, undo and redo; the track always stays connected', async ({ page }) => {
+test('edit mode: the ghost shows the next piece; add, turn, climb, specials, remove, undo and redo; the track always stays connected', async ({ page }) => {
+  test.setTimeout(180_000);
   await page.goto('/');
   await ready(page);
   await page.getByRole('button', { name: 'Explore the meadow' }).click();
   await page.getByRole('button', { name: 'Build', exact: true }).click();
+  const btn = (name: string) => page.getByRole('button', { name, exact: true });
+  // The train waits in the station while building, and a ghost piece is shown (nothing committed yet).
+  await expect.poll(() => page.evaluate(() => (window as any).__cozy.engine.sim.state)).toBe('hold');
+  await expect.poll(() => page.evaluate(() => !!(window as any).__cozy.engine.previewDesign)).toBe(true);
   const n0 = await nodeCount(page);
-  for (const name of ['Left', 'Up', 'Hill', 'Right']) {
-    await page.getByRole('button', { name, exact: true }).click();
+  await btn('Add piece').click();
+  await expect.poll(() => nodeCount(page)).toBeGreaterThan(n0);
+  expect(await connected(page)).toBe(true);
+  for (const [choice, label] of [['Turn left', 'Up'], ['Turn right', 'Level'], ['Straight', 'Down']] as const) {
+    await btn(choice).click();
+    await btn(label).click();
+    await btn('Add piece').click();
     expect(await connected(page)).toBe(true);
   }
-  const n1 = await nodeCount(page);
-  expect(n1).toBeGreaterThan(n0);
-  const endY = () => page.evaluate(() => {
-    const d = (window as any).__cozy.store.getState().design;
-    return d.nodes[d.nodes.length - 1].p[1];
-  });
-  const y0 = await endY();
-  await page.getByRole('button', { name: 'Higher' }).click();
-  await page.getByRole('button', { name: 'Higher' }).click();
-  await expect.poll(endY).toBeGreaterThan(y0 + 1);
+  await btn('Loop').click();
+  await expect(page.getByText(/Loop ends/)).toBeVisible();
+  await btn('Add piece').click();
   expect(await connected(page)).toBe(true);
+  const n1 = await nodeCount(page);
   await page.screenshot({ path: `test-results/visual/${test.info().project.name}-build.png` });
   await page.getByRole('button', { name: 'Remove the last piece' }).click();
   await expect.poll(() => nodeCount(page)).toBeLessThan(n1);
-  expect(await connected(page)).toBe(true);
   const n2 = await nodeCount(page);
   await page.getByRole('button', { name: /^Undo/ }).click();
   await expect.poll(() => nodeCount(page)).toBeGreaterThan(n2);
   await page.getByRole('button', { name: /^Redo/ }).click();
   await expect.poll(() => nodeCount(page)).toBe(n2);
   expect(await connected(page)).toBe(true);
+  // Leaving edit mode lets the train run again and removes the ghost.
+  await btn('Build').click();
+  await expect.poll(() => page.evaluate(() => !!(window as any).__cozy.engine.previewDesign)).toBe(false);
+});
+
+test('building never leaks GPU memory (phones reload the page when it runs out)', async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.goto('/');
+  await ready(page);
+  await page.getByRole('button', { name: 'Explore the meadow' }).click();
+  await page.getByRole('button', { name: 'Build', exact: true }).click();
+  const geometries = () => page.evaluate(() => (window as any).__cozy.engine.renderer.info.memory.geometries as number);
+  await page.getByRole('button', { name: 'Add piece', exact: true }).click();
+  await page.waitForTimeout(500);
+  const before = await geometries();
+  for (let i = 0; i < 12; i++) {
+    await page.getByRole('button', { name: 'Add piece', exact: true }).click();
+    await page.getByRole('button', { name: 'Remove the last piece' }).click();
+  }
+  await page.waitForTimeout(800);
+  expect(await geometries()).toBeLessThan(before + 15);
 });
 
 test('a two-finger pinch moves the camera and never builds', async ({ page }) => {

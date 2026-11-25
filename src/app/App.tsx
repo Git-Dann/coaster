@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { Engine } from '../engine/core/engine';
 import { useGame } from '../stores/game';
-import { connectStore, engineCallbacks, removeLast } from './bridge';
+import { addGhost, chooseBuild, connectStore, engineCallbacks, removeLast } from './bridge';
 import { services, ui } from './services';
 import { saves, watchForSaves } from './persistence';
 import { installAudioUnlock } from './audio-unlock';
 import { BottomNav, Diagnostics, Telemetry, Toasts, TopBar } from '../components/Hud';
-import { BuildTray, DecorateTray, HeightLever, PaintTray, RideTray, SkyTray } from '../components/Trays';
+import { BuildTray, DecorateTray, PaintTray, RideTray, SkyTray } from '../components/Trays';
 import { Compatibility, MenuDialog, PhotoMode, RelaxOverlay, SavesDialog, SettingsDialog, Welcome } from '../components/Dialogs';
 import '../components/ui.css';
 
@@ -165,6 +165,33 @@ export function App() {
         case 'Delete':
           if (g.panel === 'build') removeLast();
           break;
+        case 'Enter':
+          if (g.panel === 'build' && t.tagName !== 'BUTTON') {
+            e.preventDefault();
+            addGhost();
+          }
+          break;
+        case 'ArrowLeft':
+        case 'ArrowRight':
+        case 'ArrowUp':
+        case 'ArrowDown':
+          // Edit mode: arrows choose the next piece (left/right turn, up/down slope).
+          if (g.panel === 'build' && t.getAttribute('role') !== 'slider') {
+            e.preventDefault();
+            const c = g.buildChoice.kind === 'track' ? g.buildChoice : { kind: 'track' as const, turn: 0 as const, slope: 0 as const };
+            const clamp = (v: number) => Math.max(-1, Math.min(1, v)) as -1 | 0 | 1;
+            const turn = e.key === 'ArrowLeft' ? clamp(c.turn + 1) : e.key === 'ArrowRight' ? clamp(c.turn - 1) : c.turn;
+            const slope = e.key === 'ArrowUp' ? clamp(c.slope + 1) : e.key === 'ArrowDown' ? clamp(c.slope - 1) : c.slope;
+            chooseBuild({ kind: 'track', turn, slope });
+          } else {
+            // Keyboard camera control as an accessible alternative to dragging.
+            const r = services.engine?.rig;
+            if (e.key === 'ArrowLeft') r?.orbitBy(-40, 0, 800);
+            if (e.key === 'ArrowRight') r?.orbitBy(40, 0, 800);
+            if (e.key === 'ArrowUp') r?.zoomBy(0.9);
+            if (e.key === 'ArrowDown') r?.zoomBy(1.1);
+          }
+          break;
         case 'b':
           useGame.setState({ panel: g.panel === 'build' ? 'none' : 'build' });
           break;
@@ -187,19 +214,6 @@ export function App() {
           useGame.setState({ camera: order[(i + 1) % order.length]! });
           break;
         }
-        // Keyboard camera control as an accessible alternative to dragging.
-        case 'ArrowLeft':
-          services.engine?.rig.orbitBy(-40, 0, 800);
-          break;
-        case 'ArrowRight':
-          services.engine?.rig.orbitBy(40, 0, 800);
-          break;
-        case 'ArrowUp':
-          services.engine?.rig.zoomBy(0.9);
-          break;
-        case 'ArrowDown':
-          services.engine?.rig.zoomBy(1.1);
-          break;
         default:
           break;
       }
@@ -217,7 +231,6 @@ export function App() {
       {ready && !immersive && (
         <>
           <TopBar />
-          <HeightLever />
           <Telemetry />
           <div className="cc-dock">
             {panel === 'build' && <BuildTray />}

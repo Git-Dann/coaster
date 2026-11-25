@@ -14,17 +14,24 @@ import type { TrackDesign, TrackNode } from './types';
  * left disconnected.
  */
 
-type Seg = { kind: 'L' | 'R' | 'S'; len: number };
+export type Seg = { kind: 'L' | 'R' | 'S'; len: number };
 
 const TAU = Math.PI * 2;
-const mod2pi = (a: number) => ((a % TAU) + TAU) % TAU;
+/** Angle in [0, 2π), with anything within a hair of 2π treated as 0 (rounding must never add a full circle). */
+const mod2pi = (a: number) => {
+  const m = ((a % TAU) + TAU) % TAU;
+  return m > TAU - 1e-7 ? 0 : m;
+};
 
-interface Pose {
+export interface Pose {
   x: number;
   z: number;
   /** Heading in the x–z plane, radians, 0 = +X, positive = turning left (towards −Z). */
   h: number;
 }
+
+/** Rounding can push an exact zero slightly negative; treat it as zero. */
+const clampTiny = (v: number) => (v < 0 && v > -1e-9 ? 0 : v);
 
 /** Shortest Dubins path between poses with radius R. Returns segments with lengths in metres. */
 export function dubins(a: Pose, b: Pose, R: number): Seg[] {
@@ -44,7 +51,7 @@ export function dubins(a: Pose, b: Pose, R: number): Seg[] {
   const cands: Array<[string, number, number, number]> = [];
   // LSL
   {
-    const p2 = 2 + D * D - 2 * cab + 2 * D * (sa - sb);
+    const p2 = clampTiny(2 + D * D - 2 * cab + 2 * D * (sa - sb));
     if (p2 >= 0) {
       const tmp = Math.atan2(cb - ca, D + sa - sb);
       cands.push(['LSL', mod2pi(-alpha + tmp), Math.sqrt(p2), mod2pi(beta - tmp)]);
@@ -52,7 +59,7 @@ export function dubins(a: Pose, b: Pose, R: number): Seg[] {
   }
   // RSR
   {
-    const p2 = 2 + D * D - 2 * cab + 2 * D * (sb - sa);
+    const p2 = clampTiny(2 + D * D - 2 * cab + 2 * D * (sb - sa));
     if (p2 >= 0) {
       const tmp = Math.atan2(ca - cb, D - sa + sb);
       cands.push(['RSR', mod2pi(alpha - tmp), Math.sqrt(p2), mod2pi(-beta + tmp)]);
@@ -60,7 +67,7 @@ export function dubins(a: Pose, b: Pose, R: number): Seg[] {
   }
   // LSR
   {
-    const p2 = -2 + D * D + 2 * cab + 2 * D * (sa + sb);
+    const p2 = clampTiny(-2 + D * D + 2 * cab + 2 * D * (sa + sb));
     if (p2 >= 0) {
       const p = Math.sqrt(p2);
       const tmp = Math.atan2(-ca - cb, D + sa + sb) - Math.atan2(-2, p);
@@ -69,7 +76,7 @@ export function dubins(a: Pose, b: Pose, R: number): Seg[] {
   }
   // RSL
   {
-    const p2 = D * D - 2 + 2 * cab - 2 * D * (sa + sb);
+    const p2 = clampTiny(D * D - 2 + 2 * cab - 2 * D * (sa + sb));
     if (p2 >= 0) {
       const p = Math.sqrt(p2);
       const tmp = Math.atan2(ca + cb, D - sa - sb) - Math.atan2(2, p);

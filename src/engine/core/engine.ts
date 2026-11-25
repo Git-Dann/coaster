@@ -177,7 +177,7 @@ export class Engine {
     s.fog = this.atmosphere.fog;
     s.add(this.atmosphere.sky, this.atmosphere.sun, this.atmosphere.sun.target, this.atmosphere.hemi);
     s.add(this.terrain.group, this.vegetation.group, this.scenery.group, this.water.mesh);
-    s.add(this.trackRenderer.mesh, this.previewRenderer.mesh, this.supports.group, this.train.group, this.station.group);
+    s.add(this.trackRenderer.mesh, this.previewRenderer.mesh, this.supports.group, this.train.group, this.station.group, this.ghostPole);
     s.add(this.weather.rain, this.weather.snow);
 
     // Construction handles.
@@ -306,7 +306,7 @@ export class Engine {
     // Material behaviour: timber structures flex more; wooden track rolls rougher.
     this.flex.profile = TIMBER_STYLES.has(design.supportStyle) ? FLEX_TIMBER : FLEX_STEEL;
     this.sim.trackRoughness = design.style === 'wood' ? 1.55 : design.style === 'mine' ? 1.3 : 1;
-    if (!this.previewDesign) this.refreshSupports(animateSupports);
+    this.refreshSupports(animateSupports);
     this.station.build(this.track, (x, z) => this.terrain.heightAt(x, z));
     if (this.track && designKey(design) !== prevKey) {
       this.sim.setTrack(this.track);
@@ -321,21 +321,98 @@ export class Engine {
     if (!design || design.nodes.length < 2) {
       this.previewTrack = null;
       this.previewRenderer.update(null, 'tubular');
-      this.refreshSupports(true);
+      this.ghostPole.visible = false;
       return;
     }
     this.previewTrack = new BakedTrack(design, 0.25);
     const committedNodes = this.design?.nodes.length ?? 0;
     const from = committedNodes >= 1 && committedNodes <= design.nodes.length ? this.previewTrack.nodeS[Math.max(0, committedNodes - 1)] ?? 0 : 0;
-    this.previewRenderer.update(this.previewTrack, design.style, design.closed && !this.design?.closed ? from : from);
-    this.refreshSupports(true);
+    this.previewRenderer.update(this.previewTrack, design.style, from);
+    // A slim pole from the ghost's end down to the ground shows how high it will be.
+    const end = design.nodes[design.nodes.length - 1]!.p;
+    const gy = this.terrain.heightAt(end[0], end[2]);
+    const h = Math.max(0.05, end[1] - gy);
+    this.ghostPole.position.set(end[0], gy + h / 2, end[2]);
+    this.ghostPole.scale.set(1, h, 1);
+    this.ghostPole.visible = true;
+    // Supports stay as they are (the committed coaster's): the ghost floats until it is built.
   }
 
+  private readonly groundAt = (x: number, z: number) => this.terrain.heightAt(x, z);
+  private readonly watchState = { inStation: false, stationSide: 1, trackNear: (x: number, y: number, z: number) => this.trackNear(x, y, z) };
+  private supportMembers: Member[] = [];
+
+  /** What the watch cameras need to know this frame (no allocation). */
+  private watchInfo(): { inStation: boolean; stationSide: number; trackNear: (x: number, y: number, z: number) => number | null } {
+    const inStation = this.sim.state === 'hold' || this.sim.state === 'dispatch';
+    // Arriving at the station: pick the side of the platform with a clear view of the train.
+    if (inStation && !this.watchState.inStation) this.watchState.stationSide = this.clearStationSide();
+    this.watchState.inStation = inStation;
+    return this.watchState;
+  }
+
+  /** +1 or −1: which side of the train has no support or track between a low camera and the train. */
+  private clearStationSide(): number {
+    const m = this.train.leadMatrix;
+    const p = new THREE.Vector3().setFromMatrixPosition(m);
+    const f = new THREE.Vector3(m.elements[0], 0, m.elements[2]).normalize();
+    const side = new THREE.Vector3(-f.z, 0, f.x);
+    const blocked = (sgn: number) => {
+      let hits = 0;
+      const cam = p.clone().addScaledVector(side, 9 * sgn).addScaledVector(f, -3).add(new THREE.Vector3(0, 2.2, 0));
+      for (let k = 1; k < 10; k++) {
+        const q = cam.clone().lerp(p, k / 10);
+        for (const mem of this.supportMembers) {
+          if (mem.kind === 'pad') continue;
+          if (distToSegment(q, mem.a, mem.b) < mem.r + 0.5) hits++;
+        }
+        if (this.trackNear(q.x, q.y, q.z) !== null && k < 7) hits++;
+      }
+      return hits;
+    };
+    return blocked(1) <= blocked(-1) ? 1 : -1;
+  }
+
+  /** Height of the nearest track within a camera-sized space around a point, or null if clear. */
+  private trackNear(x: number, y: number, z: number): number | null {
+    const t = this.track;
+    if (!t) return null;
+    let best: number | null = null;
+    let bd = Infinity;
+    for (let i = 0; i < t.count; i += 4) {
+      const dx = t.pos[i * 3]! - x;
+      const dz = t.pos[i * 3 + 2]! - z;
+      if (dx * dx + dz * dz > 3.5 * 3.5) continue;
+      const dy = t.pos[i * 3 + 1]! - y;
+      if (Math.abs(dy) > 4.5) continue;
+      const d = dx * dx + dz * dz + dy * dy;
+      if (d < bd) {
+        bd = d;
+        best = t.pos[i * 3 + 1]!;
+      }
+    }
+    return best;
+  }
+
+  /** Hold the train in the station (edit mode), or let it run again. */
+  holdTrain(hold: boolean): void {
+    this.sim.autoDispatch = !hold;
+    if (hold) this.resetTrain();
+  }
+
+  private readonly ghostPole = (() => {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 1, 8), new THREE.MeshBasicMaterial({ color: '#F2B98C', transparent: true, opacity: 0.75, depthWrite: false }));
+    m.visible = false;
+    m.renderOrder = 2;
+    return m;
+  })();
+
   private refreshSupports(animate: boolean): void {
-    const d = this.previewDesign ?? this.ridden;
-    const t = this.previewDesign ? this.previewTrack : this.track;
+    const d = this.ridden;
+    const t = this.track;
     let members: Member[] = [];
     if (d && t) members = generateSupports(d, t, (x, z) => this.terrain.heightAt(x, z));
+    this.supportMembers = members;
     this.supports.setMembers(members, animate);
   }
 
@@ -492,8 +569,12 @@ export class Engine {
   }
 
   /** Smoothly move the build camera to look at a point, keeping the current zoom. */
-  lookAt(p: V3): void {
+  lookAt(p: V3, distance?: number): void {
     if (this.rig.mode !== 'orbit') return;
+    if (distance) {
+      this.rig.focusOn(new THREE.Vector3(p[0], p[1], p[2]), distance);
+      return;
+    }
     // The view offset centres the point in the clear area; keep a distance that shows the
     // surroundings without the newest piece becoming a speck.
     this.rig.focusOn(new THREE.Vector3(p[0], p[1], p[2]), THREE.MathUtils.clamp(this.rig.distance, 45, 85));
@@ -777,7 +858,7 @@ export class Engine {
     } else this.train.group.visible = false;
 
     // Camera.
-    this.rig.update(dt, this.train.leadMatrix, this.train.rearMatrix, this.sim.v, (x, z) => this.terrain.heightAt(x, z));
+    this.rig.update(dt, this.train.leadMatrix, this.train.rearMatrix, this.sim.v, this.groundAt, this.watchInfo());
     this.applyViewOffset();
     const cam = this.rig.camera;
     const focus = this.rig.mode === 'orbit' || this.rig.mode === 'relax' ? this.rig.target : cam.position;
@@ -956,6 +1037,16 @@ function estimateSpeed(d: TrackDesign): number {
   const launch = Math.max(0, ...d.nodes.filter((n) => n.kind === 'launch').map((n) => n.param ?? 0));
   const fall = end ? maxY - end.p[1] : 0;
   return Math.min(24, Math.max(8, Math.sqrt(2 * 9.81 * Math.max(0, fall)) * 0.85, launch * 0.85));
+}
+
+/** Distance from a point to a segment a–b. */
+function distToSegment(q: THREE.Vector3, a: readonly number[], b: readonly number[]): number {
+  const abx = b[0]! - a[0]!;
+  const aby = b[1]! - a[1]!;
+  const abz = b[2]! - a[2]!;
+  const len2 = abx * abx + aby * aby + abz * abz || 1;
+  const t = Math.max(0, Math.min(1, ((q.x - a[0]!) * abx + (q.y - a[1]!) * aby + (q.z - a[2]!) * abz) / len2));
+  return Math.hypot(q.x - (a[0]! + abx * t), q.y - (a[1]! + aby * t), q.z - (a[2]! + abz * t));
 }
 
 function designKey(d: TrackDesign): string {

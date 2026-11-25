@@ -60,9 +60,9 @@ function buildCar(style: CarStyle, mats: Mats, lead: boolean): { group: THREE.Gr
   parts.push(rbox(wall * 2, sh.bodyH * 0.9, sh.bodyW, sh.radius, -L / 2 + wall, baseY + sh.bodyH * 0.45, 0));
   parts.push(rbox(wall * 2, sh.bodyH * (lead ? 1.1 : 0.9), sh.bodyW, sh.radius, L / 2 - wall, baseY + sh.bodyH * (lead ? 0.55 : 0.45), 0));
   if (lead) {
-    // Rounded nose.
-    const nose = new THREE.SphereGeometry(1, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2).scale(0.55, sh.bodyH * 0.9, sh.bodyW / 2).rotateZ(-Math.PI / 2).translate(L / 2, baseY + sh.bodyH * 0.38, 0);
-    parts.push(nose);
+    // A low, raked front panel (no dome): leans forward from the front wall like a real lead car.
+    const front = rbox(0.14, sh.bodyH * 1.05, sh.bodyW, 0.035, 0, 0, 0).rotateZ(-0.3).translate(L / 2 + 0.02, baseY + sh.bodyH * 0.5, 0);
+    parts.push(front);
   }
   const body = new THREE.Mesh(merge(parts), mats.primary);
   body.castShadow = true;

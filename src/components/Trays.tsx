@@ -3,8 +3,8 @@ import { useGame } from '../stores/game';
 import { Icon } from '../design-system/Icon';
 import { SWATCHES } from '../design-system/controls';
 import { services, ui } from '../app/services';
-import { adjustActive, removeLast, resizeActive, tapPiece } from '../app/bridge';
-import { PIECES, paramRange, pieceById } from '../features/builder/simple-builder';
+import { addGhost, chooseBuild, removeLast } from '../app/bridge';
+import { SPECIALS, pieceById, type BuildChoice, type Slope, type Turn } from '../features/builder/simple-builder';
 import { autoGarden } from '../features/scenery/garden';
 import { MAX_CARS, MIN_CARS, type CarStyle } from '../engine/train/config';
 import type { SupportStyle, TrackStyle } from '../engine/track/types';
@@ -89,103 +89,71 @@ function Swatch(props: { colour: string; on: boolean; label: string; onClick: ()
   );
 }
 
-// ------------------------------------------------------------------ Build
+// ------------------------------------------------------------------ Build (edit mode)
 
-export function BuildTray() {
-  const active = useGame((s) => s.active);
-  const piece = active ? pieceById(active.piece) : null;
-  return (
-    <Tray label="Build">
-      <Row label="Track pieces">
-        {PIECES.map((p) => (
-          <Card key={p.id} label={p.label} icon={p.icon} on={active?.piece === p.id} onClick={() => tapPiece(p.id)} />
-        ))}
-      </Row>
-      <div className="cc-tray-actions">
-        <button type="button" className="cc-pill-btn" onClick={() => (ui('tap'), removeLast())} aria-label="Remove the last piece">
-          <Icon name="trash" size={20} /> <span>Remove last</span>
-        </button>
-        {piece?.sizeKey && (
-          <div className="cc-pill-pair" role="group" aria-label="Piece size">
-            <button type="button" onClick={() => resizeActive(0.8)} aria-label="Make it smaller">
-              <Icon name="minus" size={20} />
-            </button>
-            <span>Size</span>
-            <button type="button" onClick={() => resizeActive(1.25)} aria-label="Make it bigger">
-              <Icon name="plus" size={20} />
-            </button>
-          </div>
-        )}
-        <span className="cc-tray-tip">{active ? 'Drag the ring to steer · lever to go up or down' : 'Tap a piece to add it'}</span>
-      </div>
-    </Tray>
-  );
+const DIRECTIONS: Array<{ turn: Turn; label: string; icon: string }> = [
+  { turn: 1, label: 'Turn left', icon: 'p-left' },
+  { turn: 0, label: 'Straight', icon: 'p-straight' },
+  { turn: -1, label: 'Turn right', icon: 'p-right' },
+];
+const SLOPES: Array<{ slope: Slope; label: string; icon: string }> = [
+  { slope: -1, label: 'Down', icon: 'p-down' },
+  { slope: 0, label: 'Level', icon: 'minus' },
+  { slope: 1, label: 'Up', icon: 'p-up' },
+];
+
+function ghostHint(ghost: ReturnType<typeof useGame.getState>['ghost'], choice: BuildChoice): string {
+  if (!ghost) return 'Choose the next piece';
+  if (ghost.atGround) return 'Already at the ground, so this piece stays level';
+  if (ghost.crossing) return ghost.crossing.above ? `Passes under the track above (${Math.round(ghost.crossing.gap)} m clear)` : `Goes over the track below (${Math.round(ghost.crossing.gap)} m clear)`;
+  const h = Math.round(ghost.height);
+  const what = choice.kind === 'special' ? pieceById(choice.id).label : 'The next piece';
+  return h <= 2 ? `${what} ends near the ground` : `${what} ends ${h} m up`;
 }
 
-/** A big vertical lever on the right edge: slide with a thumb to raise or lower the newest piece. */
-export function HeightLever() {
-  const active = useGame((s) => s.active);
-  const panel = useGame((s) => s.panel);
-  const ref = useRef<HTMLDivElement>(null);
-  const [drag, setDrag] = useState(false);
-  if (panel !== 'build' || !active) return null;
-  const key = pieceById(active.piece).heightKey;
-  if (!key) return null;
-  const range = paramRange(active.piece, key);
-  if (!range) return null;
-  // Depth is the inverse of height for drops.
-  const inverted = key === 'depth';
-  const value = active.params[key] ?? 0;
-  const t = (value - range.min) / (range.max - range.min);
-  const pos = inverted ? t : 1 - t;
-  const set = (clientY: number) => {
-    const r = ref.current?.getBoundingClientRect();
-    if (!r) return;
-    let u = (clientY - r.top) / r.height;
-    u = Math.max(0, Math.min(1, u));
-    const frac = inverted ? u : 1 - u;
-    adjustActive({ [key]: range.min + frac * (range.max - range.min) });
-  };
-  const nudge = (dir: 1 | -1) => {
-    ui('slider');
-    const step = (range.max - range.min) / 12;
-    adjustActive({ [key]: value + (inverted ? -dir : dir) * step });
-  };
+export function BuildTray() {
+  const choice = useGame((s) => s.buildChoice);
+  const ghost = useGame((s) => s.ghost);
+  const track = choice.kind === 'track' ? choice : null;
+  const pick = (turn: Turn, slope: Slope) => chooseBuild({ kind: 'track', turn, slope });
   return (
-    <div className="cc-lever" aria-label="Height">
-      <button type="button" className="cc-lever-end" aria-label="Higher" onClick={() => nudge(1)}>
-        <Icon name="up" size={20} />
-      </button>
-      <div
-        ref={ref}
-        className={`cc-lever-track${drag ? ' drag' : ''}`}
-        role="slider"
-        aria-label="Height of the newest piece"
-        aria-valuemin={range.min}
-        aria-valuemax={range.max}
-        aria-valuenow={Math.round(value)}
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === 'ArrowUp') nudge(1);
-          if (e.key === 'ArrowDown') nudge(-1);
-        }}
-        onPointerDown={(e) => {
-          e.currentTarget.setPointerCapture(e.pointerId);
-          setDrag(true);
-          ui('select');
-          set(e.clientY);
-        }}
-        onPointerMove={(e) => drag && set(e.clientY)}
-        onPointerUp={() => setDrag(false)}
-        onPointerCancel={() => setDrag(false)}
-      >
-        <span className="cc-lever-fill" style={{ top: `${pos * 100}%` }} />
-        <span className="cc-lever-thumb" style={{ top: `${pos * 100}%` }} />
+    <Tray label="Build">
+      <div className="cc-build">
+        <div className="cc-seg" role="group" aria-label="Direction">
+          {DIRECTIONS.map((d) => (
+            <button key={d.turn} type="button" className={track?.turn === d.turn ? 'on' : ''} aria-pressed={track?.turn === d.turn} onClick={() => pick(d.turn, track?.slope ?? 0)}>
+              <Icon name={d.icon} size={24} />
+              <span>{d.label}</span>
+            </button>
+          ))}
+        </div>
+        <div className="cc-seg" role="group" aria-label="Slope">
+          {SLOPES.map((sl) => (
+            <button key={sl.slope} type="button" className={track?.slope === sl.slope ? 'on' : ''} aria-pressed={track?.slope === sl.slope} onClick={() => pick(track?.turn ?? 0, sl.slope)}>
+              <Icon name={sl.icon} size={24} />
+              <span>{sl.label}</span>
+            </button>
+          ))}
+        </div>
       </div>
-      <button type="button" className="cc-lever-end" aria-label="Lower" onClick={() => nudge(-1)}>
-        <Icon name="down" size={20} />
-      </button>
-    </div>
+      <Row label="Special pieces">
+        {SPECIALS.map((id) => {
+          const p = pieceById(id);
+          return <Card key={id} small label={p.label} icon={p.icon} on={choice.kind === 'special' && choice.id === id} onClick={() => chooseBuild({ kind: 'special', id })} />;
+        })}
+      </Row>
+      <p className="cc-build-hint" aria-live="polite">
+        {ghostHint(ghost, choice)}
+      </p>
+      <div className="cc-build-actions">
+        <button type="button" className="cc-pill-btn" onClick={() => (ui('tap'), removeLast())} aria-label="Remove the last piece">
+          <Icon name="trash" size={20} /> <span>Remove</span>
+        </button>
+        <button type="button" className="cc-add-btn" onClick={() => (ui('success'), addGhost())} aria-label="Add piece" disabled={!ghost}>
+          <Icon name="plus" size={22} /> <span>Add piece</span>
+        </button>
+      </div>
+    </Tray>
   );
 }
 

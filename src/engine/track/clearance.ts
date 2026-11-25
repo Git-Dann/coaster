@@ -35,7 +35,8 @@ function arcSep(a: number, b: number, track: BakedTrack): number {
  * that is more than `minArc` metres away along the track. Points in the protected tail (from arc
  * position `protectFromS`) are never moved: their partner moves instead.
  */
-export function findClashes(design: TrackDesign, fromIndex: number, ground: (x: number, z: number) => number, protectTail = 0, minArc = 30): { baked: BakedTrack; conflicts: Conflict[] } {
+export function findClashes(design: TrackDesign, fromIndex: number, ground: (x: number, z: number) => number, protectTail = 0, minArc = 30): { baked: BakedTrack; conflicts: Conflict[]; unresolved: boolean } {
+  let unresolved = false;
   const baked = new BakedTrack(design, 0.5);
   const sJoin = baked.nodeS[Math.max(0, fromIndex - 1)] ?? 0;
   const protectIdx = design.nodes.length - protectTail;
@@ -71,7 +72,12 @@ export function findClashes(design: TrackDesign, fromIndex: number, ground: (x: 
           // Decide which point moves: only new, unprotected track moves; prefer the later one.
           const nI = isNew(si);
           const nJ = isNew(sj);
-          if (!nI && !nJ) continue; // a clash in existing track is not ours to change
+          if (!nI && !nJ) {
+            // Neither point may move. If one is ours (in the protected tail), the clash can't be fixed
+            // from here: report it so the caller can try another way.
+            if ((si >= sJoin || sj >= sJoin) && protectTail > 0) unresolved = true;
+            continue;
+          }
           const [mover, other, my, oy] = nJ ? [j, i, yj, y] : [i, j, y, yj];
           void other;
           const mx = baked.pos[mover * 3]!;
@@ -85,7 +91,7 @@ export function findClashes(design: TrackDesign, fromIndex: number, ground: (x: 
       }
   }
   const conflicts: Conflict[] = [...bySample.entries()].map(([i, lift]) => ({ s: i * baked.ds, lift }));
-  return { baked, conflicts };
+  return { baked, conflicts, unresolved };
 }
 
 /**
@@ -95,8 +101,8 @@ export function findClashes(design: TrackDesign, fromIndex: number, ground: (x: 
  */
 export function separateCrossings(design: TrackDesign, fromIndex: number, ground: (x: number, z: number) => number, protectTail = 0): boolean {
   for (let iter = 0; iter < 6; iter++) {
-    const { baked, conflicts } = findClashes(design, fromIndex, ground, protectTail);
-    if (conflicts.length === 0) return true;
+    const { baked, conflicts, unresolved } = findClashes(design, fromIndex, ground, protectTail);
+    if (conflicts.length === 0) return !unresolved;
     const last = design.nodes.length - protectTail;
     for (let i = fromIndex; i < last; i++) {
       const sNode = baked.nodeS[i] ?? baked.length;
@@ -129,5 +135,6 @@ export function separateCrossings(design: TrackDesign, fromIndex: number, ground
       n.dir = [Math.cos(h) * Math.cos(pitch), Math.sin(pitch), -Math.sin(h) * Math.cos(pitch)];
     }
   }
-  return findClashes(design, fromIndex, ground, protectTail).conflicts.length === 0;
+  const last = findClashes(design, fromIndex, ground, protectTail);
+  return last.conflicts.length === 0 && !last.unresolved;
 }

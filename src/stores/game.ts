@@ -7,7 +7,7 @@ import { CURRENT_SCHEMA } from '../types/world';
 import { cloneDesign } from '../engine/track/design-ops';
 import { defaultSettings, defaultTrain, DEFAULT_ENVIRONMENT, newSaveId } from '../features/saves';
 import { starterPlayable } from '../engine/track/starter';
-import { freshCoaster, type ActivePiece } from '../features/builder/simple-builder';
+import { DEFAULT_CHOICE, freshCoaster, type ActivePiece, type BuildChoice } from '../features/builder/simple-builder';
 import { PAD_HEIGHT } from '../engine/terrain/heightfield';
 import type { PresetId } from '../features/builder/builder';
 import { presetById } from '../features/builder/builder';
@@ -64,6 +64,10 @@ export interface GameState {
   returning: boolean;
   /** The newest piece, adjustable until another is added. */
   active: ActivePiece | null;
+  /** Edit mode: what the next piece will be. */
+  buildChoice: BuildChoice;
+  /** Edit mode: facts about the ghost piece, for the hint line (updated when the ghost changes). */
+  ghost: { height: number; atGround: boolean; crossing: { above: boolean; gap: number } | null } | null;
   /** Decorate mode eraser. */
   eraser: boolean;
   /** Paint mode sub-tab. */
@@ -146,6 +150,8 @@ export const useGame = create<GameState & GameActions>()((set, get) => ({
   connecting: false,
   returning: false,
   active: null,
+  buildChoice: DEFAULT_CHOICE,
+  ghost: null,
   eraser: false,
   paintTab: 'track',
   sheetCompact: false,

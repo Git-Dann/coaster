@@ -15,8 +15,11 @@ export function trackMaterial(opts: { preview?: boolean } = {}): THREE.MeshStand
     roughness: 0.5,
     metalness: 0.12,
     transparent: !!opts.preview,
-    opacity: opts.preview ? 0.55 : 1,
+    // The edit-mode ghost: a soft glowing sky blue that reads clearly against grass, sky and track.
+    opacity: opts.preview ? 0.78 : 1,
     depthWrite: !opts.preview,
+    emissive: opts.preview ? new THREE.Color('#2f6f9f') : new THREE.Color('#000000'),
+    emissiveIntensity: opts.preview ? 0.55 : 0,
   }) as THREE.MeshStandardMaterial & { userData: { colours: THREE.Color[] } };
   mat.userData.colours = colours;
   mat.onBeforeCompile = (shader) => {
@@ -31,7 +34,7 @@ export function trackMaterial(opts: { preview?: boolean } = {}): THREE.MeshStand
         '#include <color_fragment>',
         `#include <color_fragment>
 diffuseColor.rgb *= vPartColor;
-if (uPreview > 0.5) diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.96, 0.92, 0.86), 0.55);`,
+if (uPreview > 0.5) diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.55, 0.8, 0.98), 0.8);`,
       );
   };
   mat.customProgramCacheKey = () => (opts.preview ? 'track-preview' : 'track');
