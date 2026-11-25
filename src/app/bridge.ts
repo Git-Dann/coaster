@@ -68,6 +68,7 @@ export function tapPiece(id: PieceId): void {
 }
 
 let pending: Record<string, number> | null = null;
+let follow = 0;
 let raf = 0;
 /** Adjust the newest piece. Batched to one rebuild per animation frame for smooth dragging. */
 export function adjustActive(patch: Record<string, number>): void {
@@ -89,6 +90,12 @@ export function adjustActive(patch: Record<string, number>): void {
     }
     // Adjusting the newest piece is part of the same construction step as adding it: no new undo entry.
     useGame.setState({ design: r.design, active: r.active });
+    // Once the lever or size settles, glide the view so the newest piece stays in sight.
+    window.clearTimeout(follow);
+    follow = window.setTimeout(() => {
+      const end = useGame.getState().design.nodes.at(-1);
+      if (end) services.engine?.lookAt(end.p);
+    }, 350);
   });
 }
 
@@ -102,6 +109,15 @@ export function removeLast(): void {
   g.commitDesign(next);
   useGame.setState({ active: null });
   services.engine?.audio.build(material(next), 'delete');
+  followEnd();
+}
+
+/** Glide the build view to the open end of the track (after removing, undoing or redoing). */
+export function followEnd(): void {
+  const g = useGame.getState();
+  if (g.panel !== 'build' || g.camera !== 'orbit') return;
+  const end = g.design.nodes.at(-1);
+  if (end) services.engine?.lookAt(end.p);
 }
 
 /** Bigger / smaller for the newest piece. */

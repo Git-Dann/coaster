@@ -3,6 +3,7 @@ import { useGame, type Panel } from '../stores/game';
 import { IconButton } from '../design-system/controls';
 import { Icon } from '../design-system/Icon';
 import { services, ui } from '../app/services';
+import { followEnd } from '../app/bridge';
 import { G0 } from '../engine/physics/train-sim';
 
 const NAV: Array<{ id: Exclude<Panel, 'none'>; label: string; icon: string }> = [
@@ -38,8 +39,8 @@ export function TopBar() {
           }}
         />
         <div className="cc-pill-group" role="group" aria-label="Undo and redo">
-          <IconButton icon="undo" label="Undo" shortcut="Ctrl+Z" disabled={!canUndo} onClick={() => (ui('undo'), g().undo())} />
-          <IconButton icon="redo" label="Redo" shortcut="Ctrl+Shift+Z" disabled={!canRedo} onClick={() => (ui('redo'), g().redo())} />
+          <IconButton icon="undo" label="Undo" shortcut="Ctrl+Z" disabled={!canUndo} onClick={() => (ui('undo'), g().undo(), followEnd())} />
+          <IconButton icon="redo" label="Redo" shortcut="Ctrl+Shift+Z" disabled={!canRedo} onClick={() => (ui('redo'), g().redo(), followEnd())} />
         </div>
       </div>
     </header>

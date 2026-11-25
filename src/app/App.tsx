@@ -59,6 +59,30 @@ export function App() {
     void boot();
     const ro = new ResizeObserver(() => services.engine?.resize());
     ro.observe(canvas);
+    // Tell the camera which parts of the screen the controls cover, so it aims at the clear area.
+    const measureInsets = () => {
+      const e = services.engine;
+      if (!e) return;
+      const c = canvas.getBoundingClientRect();
+      const top = document.querySelector('.cc-top')?.getBoundingClientRect();
+      const dock = document.querySelector('.cc-dock')?.getBoundingClientRect();
+      // Only count the dock when it spans the bottom of the screen (phones); on wide screens the
+      // sheet sits beside the view.
+      const dockCovers = dock && dock.width > c.width * 0.6 ? c.bottom - dock.top : 0;
+      e.setViewInsets(top ? top.bottom - c.top : 0, dockCovers);
+    };
+    const insetObserver = new ResizeObserver(measureInsets);
+    const watchInsets = window.setInterval(() => {
+      // The dock and top bar mount after boot and change as sheets open: (re)observe them.
+      for (const sel of ['.cc-top', '.cc-dock']) {
+        const el = document.querySelector(sel);
+        if (el && !(el as HTMLElement).dataset.insetObserved) {
+          (el as HTMLElement).dataset.insetObserved = '1';
+          insetObserver.observe(el);
+        }
+      }
+      measureInsets();
+    }, 500);
     // Keep the page and browser-bar colour in step with the sky (no per-frame work: every 2 s).
     let lastBg = '';
     const bgTimer = window.setInterval(() => {
@@ -73,6 +97,8 @@ export function App() {
     return () => {
       cancelled = true;
       window.clearInterval(bgTimer);
+      window.clearInterval(watchInsets);
+      insetObserver.disconnect();
       ro.disconnect();
       disposeStore();
       disposeSaves();

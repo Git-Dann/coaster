@@ -128,6 +128,17 @@ describe('the track can never be left disconnected', () => {
   }, 60_000);
 });
 
+describe('regressions found by playtesting', () => {
+  test('left, hill, loop, right on a fresh coaster: the return never threads through the loop', () => {
+    let d = freshCoaster(starterPlayable(PAD_HEIGHT + 1), PAD_HEIGHT + 1, ground);
+    for (const id of ['left', 'hill', 'loop', 'right'] as const) d = addPiece(d, id, ground).design;
+    for (const speed of [8, 12, 16, 20, 24]) {
+      const t = new BakedTrack(withReturn(d, { groundAt: ground, speed }));
+      expect(worstClash(t).gap, `speed ${speed}`).toBeGreaterThanOrEqual(MIN_VERTICAL - 0.6);
+    }
+  });
+});
+
 describe('tap-to-add building', () => {
   test('adjusting the newest piece never changes earlier track', () => {
     const d0 = starterPlayable(PAD_HEIGHT + 1);
@@ -189,5 +200,14 @@ describe('tap-to-add building', () => {
     let d = starterPlayable(PAD_HEIGHT + 1);
     for (let i = 0; i < 4; i++) d = addPiece(d, 'down', ground).design;
     for (const node of d.nodes) expect(node.p[1]).toBeGreaterThanOrEqual(ground(node.p[0], node.p[2]) + 1.0);
+  });
+
+  test('a deepened drop or spiral never dips into the ground, even between nodes', () => {
+    for (const [id, patch] of [['drop', { depth: 60 }], ['helix', { rise: -25 }], ['down', { rise: -30 }]] as const) {
+      const r = addPiece(starterPlayable(PAD_HEIGHT + 1), id, ground);
+      const a = adjustPiece(r.design, r.active, patch, ground)!;
+      const t = new BakedTrack({ ...a.design, closed: false, nodes: a.design.nodes.slice(r.active.start - 1) }, 0.5);
+      for (let i = 0; i < t.count; i++) expect(t.pos[i * 3 + 1]! - ground(t.pos[i * 3]!, t.pos[i * 3 + 2]!), id).toBeGreaterThan(0.5);
+    }
   });
 });

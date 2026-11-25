@@ -58,7 +58,58 @@ const newGroup = () => `g${Date.now().toString(36)}${(serial++).toString(36)}`;
 /** Steepest gentle climb or descent for plain track pieces (about 19° on average, under 30° at the steepest point): taller rises get longer. */
 const MAX_GRADE = 0.35;
 
+/** Lowest point of the track from node `from` onwards, measured above the ground. */
+function minClearance(d: TrackDesign, from: number, ground: (x: number, z: number) => number): number {
+  const part: TrackDesign = { ...d, closed: false, nodes: d.nodes.slice(Math.max(0, from)) };
+  if (part.nodes.length < 2) return Infinity;
+  const t = new BakedTrack(part, 0.5);
+  let min = Infinity;
+  for (let i = 0; i < t.count; i += 2) min = Math.min(min, t.pos[i * 3 + 1]! - ground(t.pos[i * 3]!, t.pos[i * 3 + 2]!));
+  return min;
+}
+
+/**
+ * Build the piece, and if any part of it would dip into the ground, make it descend less until it
+ * fits. The adjusted value is reported back so the controls show the real shape.
+ */
 function generate(base: TrackDesign, piece: KidPiece, rawParams: Record<string, number>, group: string, ground: (x: number, z: number) => number): { design: TrackDesign; params: Record<string, number> } {
+  const params = { ...rawParams };
+  // Start from how much height there actually is to come down (to the lowest ground ahead).
+  const start = base.nodes[base.nodes.length - 1]!;
+  const hd = Math.atan2(-start.dir[2], start.dir[0]);
+  let low = ground(start.p[0], start.p[2]);
+  for (let d = 10; d <= 60; d += 10) low = Math.max(low, ground(start.p[0] + Math.cos(hd) * d, start.p[2] - Math.sin(hd) * d));
+  const avail = start.p[1] - low - 1.4;
+  if (piece.id === 'drop') {
+    const range = paramRange('drop', 'depth');
+    params.depth = Math.min(params.depth ?? 15, Math.max(range?.min ?? 4, avail));
+  } else if ((params.rise ?? 0) < 0) params.rise = Math.max(params.rise!, -Math.max(0, avail));
+  let res = generateCore(base, piece, params, group, ground);
+  for (const k of ['depth', 'rise']) if (params[k] !== undefined && rawParams[k] !== params[k]) res.params[k] = Math.round(params[k]! * 2) / 2;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    if (minClearance(res.design, base.nodes.length - 1, ground) >= 0.9) break;
+    const key = piece.id === 'drop' ? 'depth' : (params.rise ?? 0) < 0 ? 'rise' : null;
+    if (!key) break;
+    const range = paramRange(piece.id, key);
+    const v = params[key]! * 0.75;
+    params[key] = key === 'depth' && range ? Math.max(range.min, v) : v;
+    res = generateCore(base, piece, params, group, ground);
+    res.params[key] = Math.round(params[key]! * 2) / 2;
+  }
+  // Still too low (a drop that starts at ground level): climb a little first, as part of the piece.
+  const clr = minClearance(res.design, base.nodes.length - 1, ground);
+  if (clr < 0.9 && COMPLEX.has(piece.id)) {
+    const rise = 0.9 - clr + 0.6;
+    const last = base.nodes[base.nodes.length - 1]!;
+    const ramp = presetById('track').make({ p: [...last.p] as V3, dir: [...last.dir] as V3, bank: last.bank }, { length: Math.max(18, rise / MAX_GRADE), turn: 0, rise, bank: 0 }, { uprightBank: last.bank, speedAtEnd: 10, autoBank: false });
+    const raised = appendElement({ ...cloneDesign(base), closed: false }, ramp, group);
+    const res2 = generateCore(raised, piece, params, group, ground);
+    if (minClearance(res2.design, base.nodes.length - 1, ground) > clr) res = res2;
+  }
+  return res;
+}
+
+function generateCore(base: TrackDesign, piece: KidPiece, rawParams: Record<string, number>, group: string, ground: (x: number, z: number) => number): { design: TrackDesign; params: Record<string, number> } {
   const params = { ...rawParams };
   const shown = { ...rawParams };
   if (piece.preset === 'track') {

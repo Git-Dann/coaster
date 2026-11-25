@@ -1,0 +1,228 @@
+// Full playtest: presses every control on phone, desktop and landscape layouts and audits the
+// track and the interface after each step. Writes a screenshot per step and issues.json.
+//
+//   npm run build && npm run preview -- --port 4810 &
+//   node scripts/playtest.cjs test-results/playtest http://localhost:4810/ [phone|desktop|landscape]
+const { chromium, devices } = require('playwright');
+const fs = require('fs');
+const OUT = process.argv[2] || 'test-results/playtest';
+const URL = process.argv[3] || 'http://localhost:4810/';
+const only = process.argv[4];
+fs.mkdirSync(OUT, { recursive: true });
+
+const issues = [];
+const note = (ctx, msg) => {
+  const key = `${ctx.dev} | ${msg}`;
+  if (!issues.some((i) => i.key === key)) issues.push({ key, dev: ctx.dev, step: ctx.step, msg });
+};
+
+async function audit(page, ctx) {
+  const r = await page.evaluate(() => {
+    const out = { ui: [], track: null };
+    const vw = innerWidth, vh = innerHeight;
+    const vis = (el) => { const s = getComputedStyle(el); const b = el.getBoundingClientRect(); return s.visibility !== 'hidden' && s.display !== 'none' && b.width > 0 && b.height > 0 && +s.opacity !== 0; };
+    // Controls must be on screen, big enough to tap, and not overlapped by other controls.
+    const modal = document.querySelector('[role=dialog][aria-modal=true], .cc-modal');
+    const ctrls = [...document.querySelectorAll('button, [role=slider], input, select')].filter(vis).filter((el) => !modal || modal.contains(el));
+    const inScroller = (el) => el.closest('.cc-row-scroll');
+    for (const el of ctrls) {
+      const b = el.getBoundingClientRect();
+      const name = el.getAttribute('aria-label') || el.textContent.trim().slice(0, 30) || el.tagName;
+      if (!inScroller(el) && !(modal && modal.contains(el)) && (b.left < -1 || b.top < -1 || b.right > vw + 1 || b.bottom > vh + 1)) out.ui.push(`off-screen: "${name}" ${Math.round(b.left)},${Math.round(b.top)} ${Math.round(b.width)}x${Math.round(b.height)}`);
+      if ((b.width < 40 || b.height < 40) && el.tagName !== 'INPUT' && !el.closest('.cc-pill-pair') && !el.closest('.cc-tabs')) out.ui.push(`small target: "${name}" ${Math.round(b.width)}x${Math.round(b.height)}`);
+      if ((b.width < 36 || b.height < 34) && (el.closest('.cc-pill-pair') || el.closest('.cc-tabs'))) out.ui.push(`small target: "${name}" ${Math.round(b.width)}x${Math.round(b.height)}`);
+      // Is the centre actually hittable (not covered by something else)?
+      const cx = Math.min(vw - 1, Math.max(0, b.left + b.width / 2)), cy = Math.min(vh - 1, Math.max(0, b.top + b.height / 2));
+      if (!inScroller(el) || (b.left >= 0 && b.right <= vw)) {
+        const hit = document.elementFromPoint(cx, cy);
+        if (hit && hit !== el && !el.contains(hit) && !hit.contains(el)) out.ui.push(`covered: "${name}" by ${hit.className || hit.tagName}`);
+      }
+    }
+    // Text that is cut off.
+    for (const el of document.querySelectorAll('.cc-app *')) {
+      if (!vis(el) || el.children.length > 0 || el.closest('.sr-only, #cc-live')) continue;
+      if (el.scrollWidth > el.clientWidth + 2 && getComputedStyle(el).overflow !== 'visible') out.ui.push(`truncated text: "${el.textContent.trim().slice(0, 40)}"`);
+    }
+    // Track health.
+    const e = window.__cozy?.engine;
+    const t = e?.track;
+    if (t) {
+      let maxY = -1e9, minClear = 1e9;
+      for (let i = 0; i < t.count; i++) maxY = Math.max(maxY, t.pos[i * 3 + 1]);
+      let worst = 1e9;
+      const step = 8;
+      for (let i = 0; i < t.count; i += step) for (let j = i + step; j < t.count; j += step) {
+        let ds = (j - i) * t.ds; if (t.closed) ds = Math.min(ds, t.length - ds);
+        if (ds < 40) continue;
+        const dx = t.pos[i * 3] - t.pos[j * 3], dz = t.pos[i * 3 + 2] - t.pos[j * 3 + 2];
+        if (dx * dx + dz * dz > 6.25) continue;
+        worst = Math.min(worst, Math.abs(t.pos[i * 3 + 1] - t.pos[j * 3 + 1]));
+      }
+      for (let i = 0; i < t.count; i += 4) {
+        const gy = e.terrain.heightAt(t.pos[i * 3], t.pos[i * 3 + 2]);
+        minClear = Math.min(minClear, t.pos[i * 3 + 1] - gy);
+      }
+      let maxTwist = 0;
+      for (let i = 1; i < t.count; i++) maxTwist = Math.max(maxTwist, Math.abs(t.bank[i] - t.bank[i - 1]) / t.ds);
+      // In build mode the newest piece's end must be visible in the clear area.
+      const st = window.__cozy.store.getState();
+      if (st.panel === 'build' && st.camera === 'orbit') {
+        const end = st.design.nodes[st.design.nodes.length - 1].p;
+        const v = new (e.rig.camera.position.constructor)(end[0], end[1], end[2]).project(e.rig.camera);
+        const sx = (v.x + 1) / 2 * innerWidth, sy = (1 - v.y) / 2 * innerHeight;
+        const top = document.querySelector('.cc-top')?.getBoundingClientRect().bottom ?? 0;
+        const dock = document.querySelector('.cc-dock')?.getBoundingClientRect();
+        const bottom = dock && dock.width > innerWidth * 0.6 ? dock.top : innerHeight;
+        const lever = document.querySelector('.cc-lever')?.getBoundingClientRect();
+        const behindLever = lever && sx > lever.left - 10 && sy > lever.top && sy < lever.bottom;
+        if (sx < 10 || sx > innerWidth - 10 || sy < top || sy > bottom || behindLever) out.ui.push(`newest piece not in clear view (${Math.round(sx)},${Math.round(sy)})`);
+      }
+      out.track = { closed: t.closed, length: t.length, maxY, clash: worst, minClear, seamFlip: t.diagnostics.seamFlip, gap: t.diagnostics.maxGap, twist: maxTwist, cam: window.__cozy.store.getState().camera };
+    }
+    return out;
+  });
+  for (const u of r.ui) note(ctx, u);
+  const t = r.track;
+  if (t) {
+    if (!t.closed) note(ctx, `track not closed after ${ctx.step}`);
+    if (t.seamFlip) note(ctx, `track flips upside down after ${ctx.step}`);
+    if (t.gap > 1e-3) note(ctx, `track gap ${t.gap} after ${ctx.step}`);
+    if (t.clash < 4.9) note(ctx, `TRACK CLASH gap ${t.clash.toFixed(2)} m after ${ctx.step}`);
+    if (t.maxY > 70) note(ctx, `track very high (${t.maxY.toFixed(0)} m) after ${ctx.step}`);
+    if (t.minClear < 0.3) note(ctx, `track touches/under ground (${t.minClear.toFixed(2)} m) after ${ctx.step}`);
+    if (t.twist > 0.7) note(ctx, `sudden twist ${t.twist.toFixed(2)} rad/m after ${ctx.step}`);
+  }
+  return r;
+}
+
+async function run(devName, devOpts) {
+  const browser = await chromium.launch();
+  const page = await browser.newPage(devOpts);
+  const ctx = { dev: devName, step: 'load' };
+  page.on('pageerror', (e) => note(ctx, `page error: ${e.message}`));
+  page.on('console', (m) => { if (m.type() === 'error' && !/GPU stall|WebGL-/.test(m.text())) note(ctx, `console error: ${m.text()}`); });
+  let n = 0;
+  const shot = async (name) => { await page.screenshot({ path: `${OUT}/${devName}-${String(n++).padStart(3, '0')}-${name}.png` }); };
+  const step = async (name, fn, wait = 700) => {
+    ctx.step = name;
+    try { await fn(); } catch (e) { note(ctx, `FAILED step "${name}": ${String(e.message).split('\n')[0]}`); }
+    await page.waitForTimeout(wait);
+    await audit(page, ctx);
+    await shot(name.replace(/[^a-z0-9]+/gi, '_'));
+  };
+  const btn = (name, exact = true) => page.getByRole('button', { name, exact }).first();
+  const fast = () => page.evaluate(() => window.__cozy.store.getState().setSettings((s) => ({ ...s, graphics: { ...s.graphics, tier: 'battery', postProcessing: false } })));
+
+  await page.goto(URL);
+  await page.waitForFunction(() => window.__cozy && window.__cozy.engine.terrain.chunks.size > 8, null, { timeout: 60000 });
+  await step('welcome', async () => {}, 1500);
+  await fast();
+  await step('explore', () => btn('Explore the meadow').click(), 1500);
+
+  // Top bar
+  await step('mute', () => btn(/Sound on/, false).click());
+  await step('unmute', () => btn(/Sound off/, false).click());
+  await step('menu open', () => btn(/^Menu/, false).click(), 900);
+  await step('menu close', () => page.keyboard.press('Escape'), 600);
+
+  // Build: every piece, with lever and size changes
+  await step('build tab', () => btn('Build').click());
+  const pieces = ['Straight', 'Left', 'Right', 'Up', 'Down', 'Hill', 'Lift', 'Drop', 'Loop', 'Roll', 'Corkscrew', 'Spiral', 'Brakes', 'Launch'];
+  for (const p of pieces) {
+    await step(`add ${p}`, () => btn(p).click(), 900);
+    if (await page.getByRole('button', { name: 'Higher' }).isVisible().catch(() => false)) {
+      await step(`${p} higher x3`, async () => { for (let i = 0; i < 3; i++) await btn('Higher').click(); }, 600);
+      await step(`${p} lower x6`, async () => { for (let i = 0; i < 6; i++) await btn('Lower').click(); }, 600);
+    }
+    if (await page.getByRole('button', { name: 'Make it bigger' }).isEnabled().catch(() => false)) {
+      await step(`${p} bigger x2`, async () => { await btn('Make it bigger').click(); await btn('Make it bigger').click(); }, 600);
+    }
+  }
+  // Drag the lever across its whole range.
+  await step('add Straight for lever drag', () => btn('Straight').click(), 800);
+  const slider = page.getByRole('slider').first();
+  if (await slider.isVisible().catch(() => false)) {
+    const b = await slider.boundingBox();
+    for (const f of [0.02, 0.5, 0.98, 0.3]) {
+      await step(`lever drag to ${f}`, async () => {
+        await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2); await page.mouse.down();
+        await page.mouse.move(b.x + b.width / 2, b.y + b.height * f, { steps: 6 }); await page.mouse.up();
+      }, 900);
+    }
+  }
+  for (let i = 0; i < 4; i++) await step(`remove last ${i}`, () => btn('Remove the last piece').click(), 600);
+  await step('undo', () => btn(/^Undo/, false).click());
+  await step('redo', () => btn(/^Redo/, false).click());
+  await step('frame overview', async () => { await page.evaluate(() => window.__cozy.engine.frameCoaster()); }, 1500);
+
+  // Decorate
+  await step('decorate tab', () => btn('Decorate').click());
+  for (const t of ['Tree', 'Pine', 'Flowers', 'Bench', 'Hut']) {
+    await step(`pick ${t}`, () => btn(t).click());
+    await step(`place ${t}`, async () => { const vs = page.viewportSize(); await page.mouse.click(vs.width * 0.35, vs.height * 0.3); });
+  }
+  await step('eraser', () => btn('Remove').click());
+  await step('erase tap', async () => { const vs = page.viewportSize(); await page.mouse.click(vs.width * 0.35, vs.height * 0.3); });
+  await step('land tab', () => page.getByRole('tab', { name: 'Land' }).click());
+  for (const t of ['Raise', 'Smooth', 'Path']) await step(`land ${t}`, () => btn(t).click());
+  await step('brush stroke', async () => {
+    const vs = page.viewportSize();
+    await page.mouse.move(vs.width * 0.2, vs.height * 0.3); await page.mouse.down();
+    await page.mouse.move(vs.width * 0.5, vs.height * 0.32, { steps: 10 }); await page.mouse.up();
+  }, 1500);
+
+  // Paint
+  await step('paint tab', () => btn('Paint').click());
+  for (const t of ['Steel', 'Box steel', 'Wooden', 'Mine']) await step(`track type ${t}`, () => page.getByRole('group', { name: 'Track type' }).getByRole('button', { name: t, exact: true }).click(), 900);
+  await step('supports tab', () => page.getByRole('tab', { name: 'Supports' }).click());
+  for (const t of ['Pine', 'Walnut', 'Silver steel', 'Cream steel']) await step(`supports ${t}`, () => btn(t).click(), 900);
+  await step('train tab', () => page.getByRole('tab', { name: 'Train' }).click());
+  await step('more cars', async () => { for (let i = 0; i < 3; i++) if (await btn('More carriages').isEnabled()) await btn('More carriages').click(); });
+  await step('fewer cars', async () => { for (let i = 0; i < 6; i++) if (await btn('Fewer carriages').isEnabled()) await btn('Fewer carriages').click(); });
+  for (const t of ['Retro', 'Mine cart', 'Modern']) await step(`car style ${t}`, () => btn(t).click(), 800);
+
+  // Sky
+  await step('sky tab', () => btn('Sky').click());
+  for (const t of ['Sunrise', 'Golden', 'Night', 'Day']) await step(`time ${t}`, () => btn(t).click(), 1500);
+  for (const t of ['Rain', 'Snow', 'Mist', 'Sunny']) await step(`weather ${t}`, () => btn(t).click(), 1500);
+
+  // Ride
+  await step('ride tab', () => btn('Ride').click());
+  await step('ride!', () => btn('Ride!').click(), 3500);
+  await step('reopen ride sheet', () => btn('Ride').click());
+  await step('watch', () => btn('Watch').click(), 3000);
+  await step('reopen + watch again', async () => { await btn('Ride').click(); await btn('Watch').click(); }, 3000);
+  await step('back seat', async () => { await btn('Ride').click(); await btn('Back seat').click(); }, 3000);
+  await step('fast speed', async () => { await btn('Ride').click(); await btn('Fast').click(); }, 1500);
+  await step('overview', () => btn('Overview').click(), 1500);
+  await step('to station', () => btn('To station').click(), 1500);
+  await step('relax', () => btn('Relax').click(), 2500);
+  await step('leave relax', async () => { await page.mouse.click(10, 300); const b = page.getByRole('button', { name: /back|done|stop|leave|exit/i }).first(); if (await b.isVisible().catch(() => false)) await b.click(); }, 1500);
+  await step('photo', async () => { await btn('Ride').click().catch(() => {}); await btn('Photo').click(); }, 1500);
+  await step('leave photo', async () => { const b = page.getByRole('button', { name: /back|done|close|leave|exit/i }).first(); await b.click(); }, 1200);
+
+  // Menu
+  await step('menu again', () => btn(/^Menu/, false).click(), 900);
+  await step('music toggle', () => page.getByRole('switch', { name: /Music/ }).click());
+  await step('your parks', () => btn(/Your parks/, false).click(), 1000);
+  await step('close parks', () => page.keyboard.press('Escape'));
+  await step('settings', async () => { await btn(/^Menu/, false).click(); await btn(/Settings/, false).click(); }, 1000);
+  await step('close settings', () => page.keyboard.press('Escape'));
+  await step('new coaster', async () => { await btn(/^Menu/, false).click(); await btn(/New coaster/, false).click(); }, 1500);
+  await step('after new coaster', async () => { const b = page.getByRole('button', { name: /Build your own|Start|blank|fresh/i }).first(); if (await b.isVisible().catch(() => false)) await b.click(); }, 2000);
+
+  // Build again on a fresh coaster: a quick kid-style session.
+  await step('build tab 2', async () => { if (!(await btn('Straight').isVisible().catch(() => false))) await btn('Build').click(); });
+  for (const p of ['Left', 'Hill', 'Loop', 'Right', 'Spiral', 'Left', 'Drop', 'Up']) await step(`fresh add ${p}`, () => btn(p).click(), 900);
+  await step('fresh overview', async () => { await page.evaluate(() => window.__cozy.engine.frameCoaster()); }, 1500);
+  await step('fresh ride', async () => { await btn('Ride').click(); await btn('Ride!').click(); }, 4000);
+  await browser.close();
+}
+
+(async () => {
+  const devs = [['phone', { ...devices['iPhone 13'] }], ['desktop', { viewport: { width: 1280, height: 800 } }], ['landscape', { ...devices['iPhone 13 landscape'] }]];
+  for (const [n, o] of devs) if (!only || only === n) await run(n, o);
+  fs.writeFileSync(`${OUT}/issues.json`, JSON.stringify(issues, null, 1));
+  console.log(`${issues.length} issues`);
+  for (const i of issues) console.log(`- [${i.dev}] (${i.step}) ${i.msg}`);
+})();

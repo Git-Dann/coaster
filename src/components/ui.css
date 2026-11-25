@@ -446,9 +446,12 @@
   min-width: 0;
 }
 .cc-save-info b {
+  /* Park names wrap onto two lines rather than being cut off. */
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
 }
 .cc-save-info span {
   font-size: var(--fs-xs);
@@ -528,7 +531,8 @@
   gap: 6px;
   font-weight: var(--fw-bold);
   cursor: pointer;
-  opacity: 0.25;
+  /* Stays findable on touch screens (no hover): softly visible, fully visible when needed. */
+  opacity: 0.7;
   transition: opacity var(--t-slow);
 }
 .cc-relax.show,
@@ -866,6 +870,12 @@
   align-items: center;
   gap: var(--s2);
   min-width: 0;
+}
+/* While riding on a narrow screen, the name makes room for the overview button. */
+@media (max-width: 480px) {
+  .cc-app.riding .cc-coaster-name {
+    display: none;
+  }
 }
 .cc-coaster-name {
   font-weight: var(--fw-bold);
