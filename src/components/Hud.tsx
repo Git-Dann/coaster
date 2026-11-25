@@ -7,7 +7,7 @@ import { followEnd } from '../app/bridge';
 import { G0 } from '../engine/physics/train-sim';
 
 const NAV: Array<{ id: Exclude<Panel, 'none'>; label: string; icon: string }> = [
-  { id: 'build', label: 'Build', icon: 'build' },
+  { id: 'build', label: 'Edit', icon: 'build' },
   { id: 'decorate', label: 'Decorate', icon: 'scenery' },
   { id: 'paint', label: 'Paint', icon: 'style' },
   { id: 'sky', label: 'Sky', icon: 'sun' },
@@ -28,7 +28,7 @@ export function TopBar() {
         <span className="cc-coaster-name">{name}</span>
       </div>
       <div className="cc-top-right">
-        {camera !== 'orbit' && <IconButton icon="frame" label="Back to the overview" variant="solid" onClick={() => useGame.setState({ camera: 'orbit' })} />}
+        {camera !== 'orbit' && <IconButton icon="frame" label="Builder view" variant="solid" onClick={() => useGame.setState({ camera: 'orbit' })} />}
         <IconButton
           icon={muted ? 'mute' : 'speaker'}
           label={muted ? 'Sound off: tap to turn it on' : 'Sound on: tap to mute'}
@@ -69,8 +69,9 @@ export function BottomNav() {
               sceneryTool: null,
               brush: null,
               eraser: false,
-              // Closing the sheet never ends a ride or watch; only switching to another mode does.
-              ...(next !== 'ride' && next !== 'none' && cam !== 'orbit' ? { camera: 'orbit' as const } : {}),
+              // Menus never change the view. Only Edit and Decorate, which work by tapping the world,
+              // bring you back to the builder view.
+              ...((next === 'build' || next === 'decorate') && cam !== 'orbit' ? { camera: 'orbit' as const } : {}),
             });
           }}
         >

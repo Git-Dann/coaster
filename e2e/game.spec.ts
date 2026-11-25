@@ -52,44 +52,142 @@ const connected = (page: Page) =>
   });
 const nodeCount = (page: Page) => page.evaluate(() => (window as any).__cozy.store.getState().design.nodes.length);
 
-test('build: tap pieces, adjust with the lever, remove, undo and redo; the track always stays connected', async ({ page }) => {
+test('edit mode: the ghost shows the next piece; add, turn, climb, specials, remove, undo and redo; the track always stays connected', async ({ page }) => {
+  test.setTimeout(180_000);
   await page.goto('/');
   await ready(page);
-  await page.getByRole('button', { name: 'Explore the meadow' }).click();
-  await page.getByRole('button', { name: 'Build', exact: true }).click();
+  // Start blank: just the station, and the edit panel opens.
+  await page.getByRole('button', { name: /Start blank/ }).click();
+  const btn = (name: string) => page.getByRole('button', { name, exact: true });
+  // The train waits in the station while building, and a ghost piece is shown (nothing committed yet).
+  await expect.poll(() => page.evaluate(() => (window as any).__cozy.engine.sim.state)).toBe('hold');
+  await expect.poll(() => page.evaluate(() => !!(window as any).__cozy.engine.previewDesign)).toBe(true);
   const n0 = await nodeCount(page);
-  for (const name of ['Left', 'Up', 'Hill', 'Right']) {
-    await page.getByRole('button', { name, exact: true }).click();
+  await btn('Add piece').click();
+  await expect.poll(() => nodeCount(page)).toBeGreaterThan(n0);
+  expect(await connected(page)).toBe(true);
+  for (const [choice, label] of [['Turn left', 'Up'], ['Turn right', 'Level'], ['Straight', 'Down']] as const) {
+    await btn(choice).click();
+    await btn(label).click();
+    await btn('Add piece').click();
     expect(await connected(page)).toBe(true);
   }
-  const n1 = await nodeCount(page);
-  expect(n1).toBeGreaterThan(n0);
-  const endY = () => page.evaluate(() => {
-    const d = (window as any).__cozy.store.getState().design;
-    return d.nodes[d.nodes.length - 1].p[1];
-  });
-  const y0 = await endY();
-  await page.getByRole('button', { name: 'Higher' }).click();
-  await page.getByRole('button', { name: 'Higher' }).click();
-  await expect.poll(endY).toBeGreaterThan(y0 + 1);
+  // A loop needs speed: the panel offers a Launch, and the Loop appears once there's speed for it.
+  await btn('Launch').click();
+  await btn('Add piece').click();
+  await expect(btn('Loop')).toBeVisible({ timeout: 20_000 });
+  await btn('Loop').click();
+  await expect(page.getByText(/Loop ends/)).toBeVisible();
+  await btn('Add piece').click();
   expect(await connected(page)).toBe(true);
+  const n1 = await nodeCount(page);
   await page.screenshot({ path: `test-results/visual/${test.info().project.name}-build.png` });
   await page.getByRole('button', { name: 'Remove the last piece' }).click();
   await expect.poll(() => nodeCount(page)).toBeLessThan(n1);
-  expect(await connected(page)).toBe(true);
   const n2 = await nodeCount(page);
   await page.getByRole('button', { name: /^Undo/ }).click();
   await expect.poll(() => nodeCount(page)).toBeGreaterThan(n2);
   await page.getByRole('button', { name: /^Redo/ }).click();
   await expect.poll(() => nodeCount(page)).toBe(n2);
   expect(await connected(page)).toBe(true);
+  // Leaving edit mode lets the train run again and removes the ghost.
+  await btn('Edit').click();
+  await expect.poll(() => page.evaluate(() => !!(window as any).__cozy.engine.previewDesign)).toBe(false);
+});
+
+test('edit mode: no dead buttons, select and change a piece in the middle, remove it, and start blank', async ({ page }) => {
+  test.setTimeout(240_000);
+  await page.goto('/');
+  await ready(page);
+  await page.getByRole('button', { name: /Start blank/ }).click();
+  const btn = (name: string) => page.getByRole('button', { name, exact: true });
+  const ghostEnd = () => page.evaluate(() => { const d = (window as any).__cozy.engine.previewDesign; const n = d?.nodes[d.nodes.length - 1]; return n ? n.p.map((v: number) => v.toFixed(2)).join(',') : ''; });
+  // Every enabled direction/slope combination must give its own ghost.
+  for (let i = 0; i < 2; i++) await btn('Add piece').click();
+  const seen = new Map<string, string>();
+  for (const dir of ['Turn left', 'Straight', 'Turn right']) {
+    for (const slope of ['Down', 'Level', 'Up']) {
+      await btn(dir).click();
+      // Options that don't fit here are hidden (contextual), so only offered ones are checked.
+      const sb = page.getByRole('group', { name: 'Slope' }).getByRole('button', { name: slope, exact: true });
+      if ((await sb.count()) === 0) continue;
+      await sb.click();
+      // Wait until the ghost has been planned for this exact choice (slow machines lag a frame or two).
+      await expect.poll(() => page.evaluate(() => { const s = (window as any).__cozy.store.getState(); return s.ghost?.forChoice === JSON.stringify(s.buildChoice); }), { timeout: 15_000 }).toBe(true);
+      const end = await ghostEnd();
+      expect(seen.has(end), `${dir} + ${slope} gives the same ghost as ${seen.get(end)}`).toBe(false);
+      seen.set(end, `${dir} + ${slope}`);
+    }
+  }
+  // Build a few pieces, then step back and change one in the middle.
+  await btn('Straight').click();
+  await page.getByRole('group', { name: 'Slope' }).getByRole('button', { name: 'Level', exact: true }).click();
+  for (let i = 0; i < 3; i++) await btn('Add piece').click();
+  await btn('Previous piece').click();
+  await btn('Previous piece').click();
+  await expect(page.getByText(/^Piece \d+ of \d+$/)).toBeVisible();
+  const before = await nodeCount(page);
+  // Change it into something that fits here (whatever the panel offers first among the shapes).
+  await page.waitForTimeout(500);
+  await btn('Turn left').click();
+  await btn('Apply change').click();
+  await expect.poll(() => nodeCount(page)).not.toBe(before);
+  expect(await connected(page)).toBe(true);
+  await btn('Remove this piece').click();
+  expect(await connected(page)).toBe(true);
+  // Tapping the track selects a piece.
+  await btn('Go to end').click();
+  const xy = await page.evaluate(() => {
+    const e = (window as any).__cozy.engine;
+    const d = (window as any).__cozy.store.getState().design;
+    // A player taps track they can see: the first built node (from the end) that is on the open canvas.
+    for (let i = d.nodes.length - 2; i >= 0; i--) {
+      if (d.nodes[i].group === 'station') continue;
+      const p = d.nodes[i].p;
+      const v = new e.rig.camera.position.constructor(p[0], p[1], p[2]).project(e.rig.camera);
+      const x = ((v.x + 1) / 2) * innerWidth;
+      const y = ((1 - v.y) / 2) * innerHeight;
+      if (v.z < 1 && document.elementFromPoint(x, y)?.classList.contains('cc-canvas')) return [x, y];
+    }
+    return null;
+  });
+  expect(xy, 'some built track is visible on the open canvas').not.toBeNull();
+  if (!xy) return;
+  await page.mouse.click(xy[0], xy[1]);
+  await expect.poll(() => page.evaluate(() => (window as any).__cozy.store.getState().editSel)).not.toBeNull();
+  await btn('Done').click();
+  // Start blank: only the station, and the edit panel opens.
+  await page.getByRole('button', { name: /^Menu/ }).click();
+  await page.getByRole('button', { name: /New coaster/ }).click();
+  await expect.poll(() => nodeCount(page)).toBe(2);
+  await expect(btn('Add piece')).toBeVisible();
+  await btn('Add piece').click();
+  expect(await connected(page)).toBe(true);
+});
+
+test('building never leaks GPU memory (phones reload the page when it runs out)', async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.goto('/');
+  await ready(page);
+  await page.getByRole('button', { name: 'Explore the meadow' }).click();
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  const geometries = () => page.evaluate(() => (window as any).__cozy.engine.renderer.info.memory.geometries as number);
+  await page.getByRole('button', { name: 'Add piece', exact: true }).click();
+  await page.waitForTimeout(500);
+  const before = await geometries();
+  for (let i = 0; i < 12; i++) {
+    await page.getByRole('button', { name: 'Add piece', exact: true }).click();
+    await page.getByRole('button', { name: 'Remove the last piece' }).click();
+  }
+  await page.waitForTimeout(800);
+  expect(await geometries()).toBeLessThan(before + 15);
 });
 
 test('a two-finger pinch moves the camera and never builds', async ({ page }) => {
   await page.goto('/');
   await ready(page);
   await page.getByRole('button', { name: 'Explore the meadow' }).click();
-  await page.getByRole('button', { name: 'Build', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
   const before = await page.evaluate(() => ({ n: (window as any).__cozy.store.getState().design.nodes.length, d: (window as any).__cozy.engine.rig.distance }));
   await page.evaluate(async () => {
     const c = document.querySelector('canvas')!;
@@ -135,14 +233,19 @@ test('carriages change at any time, even mid-ride; timber, rain and riding all w
   await page.getByRole('button', { name: 'Rain', exact: true }).click();
   await expect.poll(() => page.evaluate(() => (window as any).__cozy.engine.atmosphere.state.rain), { timeout: 15_000 }).toBeGreaterThan(0.3);
   await page.getByRole('button', { name: 'Ride', exact: true }).click();
-  await page.getByRole('button', { name: 'Ride!' }).click();
+  await page.getByRole('button', { name: 'Front seat' }).click();
   const cam = () => page.evaluate(() => (window as any).__cozy.store.getState().camera);
   expect(await cam()).toBe('front');
   // Riding puts the sheet away for a clear view; opening and closing it never ends the ride.
-  await expect(page.getByRole('button', { name: 'Ride!' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Front seat' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Ride', exact: true }).click();
   await page.getByRole('button', { name: 'Watch' }).click();
   expect(await cam()).not.toBe('orbit');
+  // Menus never change the view: opening Sky while watching keeps watching.
+  const watchingCam = await cam();
+  await page.getByRole('button', { name: 'Sky', exact: true }).click();
+  expect(await cam()).toBe(watchingCam);
+  await page.getByRole('button', { name: 'Sky', exact: true }).click();
   await page.getByRole('button', { name: 'Ride', exact: true }).click();
   await page.getByRole('button', { name: 'Ride', exact: true }).click();
   expect(await cam()).not.toBe('orbit');

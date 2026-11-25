@@ -50,35 +50,40 @@ async function audit(page, ctx) {
     if (t) {
       let maxY = -1e9, minClear = 1e9;
       for (let i = 0; i < t.count; i++) maxY = Math.max(maxY, t.pos[i * 3 + 1]);
-      let worst = 1e9;
+      let worst = 1e9, clashAt = '';
       const step = 8;
       for (let i = 0; i < t.count; i += step) for (let j = i + step; j < t.count; j += step) {
         let ds = (j - i) * t.ds; if (t.closed) ds = Math.min(ds, t.length - ds);
         if (ds < 40) continue;
         const dx = t.pos[i * 3] - t.pos[j * 3], dz = t.pos[i * 3 + 2] - t.pos[j * 3 + 2];
         if (dx * dx + dz * dz > 6.25) continue;
-        worst = Math.min(worst, Math.abs(t.pos[i * 3 + 1] - t.pos[j * 3 + 1]));
+        const gap = Math.abs(t.pos[i * 3 + 1] - t.pos[j * 3 + 1]);
+        if (gap < worst) { worst = gap; clashAt = `s=${(i * t.ds).toFixed(0)} & ${(j * t.ds).toFixed(0)} of ${t.length.toFixed(0)}`; }
       }
       for (let i = 0; i < t.count; i += 4) {
         const gy = e.terrain.heightAt(t.pos[i * 3], t.pos[i * 3 + 2]);
         minClear = Math.min(minClear, t.pos[i * 3 + 1] - gy);
       }
-      let maxTwist = 0;
-      for (let i = 1; i < t.count; i++) maxTwist = Math.max(maxTwist, Math.abs(t.bank[i] - t.bank[i - 1]) / t.ds);
+      let maxTwist = 0, twistAt = '';
+      for (let i = 1; i < t.count; i++) {
+        let db = t.bank[i] - t.bank[i - 1];
+        db = Math.atan2(Math.sin(db), Math.cos(db)); // a roll through ±π is not a jump
+        const w = Math.abs(db) / t.ds;
+        if (w > maxTwist) { maxTwist = w; twistAt = `at s=${(i * t.ds).toFixed(0)}/${t.length.toFixed(0)} bank ${t.bank[i - 1].toFixed(2)}→${t.bank[i].toFixed(2)} kind ${t.kind[i]}`; }
+      }
       // In build mode the newest piece's end must be visible in the clear area.
       const st = window.__cozy.store.getState();
       if (st.panel === 'build' && st.camera === 'orbit') {
-        const end = st.design.nodes[st.design.nodes.length - 1].p;
+        const pd = e.previewDesign;
+        const end = (pd ?? st.design).nodes[(pd ?? st.design).nodes.length - 1].p;
         const v = new (e.rig.camera.position.constructor)(end[0], end[1], end[2]).project(e.rig.camera);
         const sx = (v.x + 1) / 2 * innerWidth, sy = (1 - v.y) / 2 * innerHeight;
         const top = document.querySelector('.cc-top')?.getBoundingClientRect().bottom ?? 0;
         const dock = document.querySelector('.cc-dock')?.getBoundingClientRect();
         const bottom = dock && dock.width > innerWidth * 0.6 ? dock.top : innerHeight;
-        const lever = document.querySelector('.cc-lever')?.getBoundingClientRect();
-        const behindLever = lever && sx > lever.left - 10 && sy > lever.top && sy < lever.bottom;
-        if (sx < 10 || sx > innerWidth - 10 || sy < top || sy > bottom || behindLever) out.ui.push(`newest piece not in clear view (${Math.round(sx)},${Math.round(sy)})`);
+        if (sx < 10 || sx > innerWidth - 10 || sy < top || sy > bottom) out.ui.push(`newest piece (ghost) not in clear view (${Math.round(sx)},${Math.round(sy)})`);
       }
-      out.track = { closed: t.closed, length: t.length, maxY, clash: worst, minClear, seamFlip: t.diagnostics.seamFlip, gap: t.diagnostics.maxGap, twist: maxTwist, cam: window.__cozy.store.getState().camera };
+      out.track = { closed: t.closed, length: t.length, maxY, clash: worst, clashAt, minClear, seamFlip: t.diagnostics.seamFlip, gap: t.diagnostics.maxGap, twist: maxTwist, twistAt, cam: window.__cozy.store.getState().camera };
     }
     return out;
   });
@@ -88,10 +93,10 @@ async function audit(page, ctx) {
     if (!t.closed) note(ctx, `track not closed after ${ctx.step}`);
     if (t.seamFlip) note(ctx, `track flips upside down after ${ctx.step}`);
     if (t.gap > 1e-3) note(ctx, `track gap ${t.gap} after ${ctx.step}`);
-    if (t.clash < 4.9) note(ctx, `TRACK CLASH gap ${t.clash.toFixed(2)} m after ${ctx.step}`);
+    if (t.clash < 4.9) note(ctx, `TRACK CLASH gap ${t.clash.toFixed(2)} m ${t.clashAt} after ${ctx.step}`);
     if (t.maxY > 70) note(ctx, `track very high (${t.maxY.toFixed(0)} m) after ${ctx.step}`);
     if (t.minClear < 0.3) note(ctx, `track touches/under ground (${t.minClear.toFixed(2)} m) after ${ctx.step}`);
-    if (t.twist > 0.7) note(ctx, `sudden twist ${t.twist.toFixed(2)} rad/m after ${ctx.step}`);
+    if (t.twist > 0.7) note(ctx, `sudden twist ${t.twist.toFixed(2)} rad/m ${t.twistAt} after ${ctx.step}`);
   }
   return r;
 }
@@ -126,31 +131,29 @@ async function run(devName, devOpts) {
   await step('menu open', () => btn(/^Menu/, false).click(), 900);
   await step('menu close', () => page.keyboard.press('Escape'), 600);
 
-  // Build: every piece, with lever and size changes
-  await step('build tab', () => btn('Build').click());
-  const pieces = ['Straight', 'Left', 'Right', 'Up', 'Down', 'Hill', 'Lift', 'Drop', 'Loop', 'Roll', 'Corkscrew', 'Spiral', 'Brakes', 'Launch'];
-  for (const p of pieces) {
-    await step(`add ${p}`, () => btn(p).click(), 900);
-    if (await page.getByRole('button', { name: 'Higher' }).isVisible().catch(() => false)) {
-      await step(`${p} higher x3`, async () => { for (let i = 0; i < 3; i++) await btn('Higher').click(); }, 600);
-      await step(`${p} lower x6`, async () => { for (let i = 0; i < 6; i++) await btn('Lower').click(); }, 600);
-    }
-    if (await page.getByRole('button', { name: 'Make it bigger' }).isEnabled().catch(() => false)) {
-      await step(`${p} bigger x2`, async () => { await btn('Make it bigger').click(); await btn('Make it bigger').click(); }, 600);
+  // Build (edit mode): every direction/slope combination and every special piece, each added.
+  await step('build tab', () => btn('Edit').click(), 1200);
+  for (const dir of ['Straight', 'Turn left', 'Turn right']) {
+    for (const slope of ['Level', 'Up', 'Down']) {
+      await step(`choose ${dir} ${slope}`, async () => { await btn(dir).click(); await btn(slope).click(); }, 700);
+      await step(`add ${dir} ${slope}`, () => btn('Add piece').click(), 900);
     }
   }
-  // Drag the lever across its whole range.
-  await step('add Straight for lever drag', () => btn('Straight').click(), 800);
-  const slider = page.getByRole('slider').first();
-  if (await slider.isVisible().catch(() => false)) {
-    const b = await slider.boundingBox();
-    for (const f of [0.02, 0.5, 0.98, 0.3]) {
-      await step(`lever drag to ${f}`, async () => {
-        await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2); await page.mouse.down();
-        await page.mouse.move(b.x + b.width / 2, b.y + b.height * f, { steps: 6 }); await page.mouse.up();
-      }, 900);
-    }
+  for (const p of ['Hill', 'Lift', 'Drop', 'Loop', 'Roll', 'Corkscrew', 'Spiral', 'Brakes', 'Launch']) {
+    await step(`choose ${p}`, () => btn(p).click(), 900);
+    await step(`add ${p}`, () => btn('Add piece').click(), 1000);
   }
+  // Edit existing pieces: step back, change one, remove one, back to the end.
+  await step('select previous piece', async () => { await btn('Previous piece').click(); await btn('Previous piece').click(); }, 1200);
+  await step('change selected to Hill', () => btn('Hill').click(), 1200);
+  await step('apply change', () => btn('Apply change').click(), 1200);
+  await step('remove selected piece', () => btn('Remove this piece').click(), 1200);
+  await step('go to end', () => btn('Go to end').click(), 1200);
+  // Keyboard building (laptops): arrows choose, Enter adds, Backspace removes.
+  await step('keyboard build', async () => {
+    await page.mouse.click(5, 300);
+    for (const k of ['ArrowLeft', 'Enter', 'ArrowUp', 'Enter', 'ArrowRight', 'ArrowRight', 'Enter', 'Backspace']) await page.keyboard.press(k);
+  }, 1200);
   for (let i = 0; i < 4; i++) await step(`remove last ${i}`, () => btn('Remove the last piece').click(), 600);
   await step('undo', () => btn(/^Undo/, false).click());
   await step('redo', () => btn(/^Redo/, false).click());
@@ -189,14 +192,14 @@ async function run(devName, devOpts) {
 
   // Ride
   await step('ride tab', () => btn('Ride').click());
-  await step('ride!', () => btn('Ride!').click(), 3500);
+  await step('ride!', () => btn('Front seat').click(), 3500);
   await step('reopen ride sheet', () => btn('Ride').click());
-  await step('watch', () => btn('Watch').click(), 3000);
-  await step('reopen + watch again', async () => { await btn('Ride').click(); await btn('Watch').click(); }, 3000);
+  await step('watch', () => btn(/^Watch/, false).click(), 3000);
+  await step('reopen + watch again', async () => { await btn('Ride').click(); await btn(/^Watch/, false).click(); }, 3000);
   await step('back seat', async () => { await btn('Ride').click(); await btn('Back seat').click(); }, 3000);
   await step('fast speed', async () => { await btn('Ride').click(); await btn('Fast').click(); }, 1500);
-  await step('overview', () => btn('Overview').click(), 1500);
-  await step('to station', () => btn('To station').click(), 1500);
+  await step('overview', () => btn('Builder view').click(), 1500);
+  await step('to station', () => btn('Train to station').click(), 1500);
   await step('relax', () => btn('Relax').click(), 2500);
   await step('leave relax', async () => { await page.mouse.click(10, 300); const b = page.getByRole('button', { name: /back|done|stop|leave|exit/i }).first(); if (await b.isVisible().catch(() => false)) await b.click(); }, 1500);
   await step('photo', async () => { await btn('Ride').click().catch(() => {}); await btn('Photo').click(); }, 1500);
@@ -213,10 +216,12 @@ async function run(devName, devOpts) {
   await step('after new coaster', async () => { const b = page.getByRole('button', { name: /Build your own|Start|blank|fresh/i }).first(); if (await b.isVisible().catch(() => false)) await b.click(); }, 2000);
 
   // Build again on a fresh coaster: a quick kid-style session.
-  await step('build tab 2', async () => { if (!(await btn('Straight').isVisible().catch(() => false))) await btn('Build').click(); });
-  for (const p of ['Left', 'Hill', 'Loop', 'Right', 'Spiral', 'Left', 'Drop', 'Up']) await step(`fresh add ${p}`, () => btn(p).click(), 900);
+  await step('build tab 2', async () => { if (!(await btn('Add piece').isVisible().catch(() => false))) await btn('Edit').click(); });
+  for (const p of ['Turn left', 'Hill', 'Loop', 'Turn right', 'Spiral', 'Turn left', 'Drop', 'Straight']) {
+    await step(`fresh add ${p}`, async () => { await btn(p).click(); await btn('Add piece').click(); }, 900);
+  }
   await step('fresh overview', async () => { await page.evaluate(() => window.__cozy.engine.frameCoaster()); }, 1500);
-  await step('fresh ride', async () => { await btn('Ride').click(); await btn('Ride!').click(); }, 4000);
+  await step('fresh ride', async () => { await btn('Ride').click(); await btn('Front seat').click(); }, 4000);
   await browser.close();
 }
 

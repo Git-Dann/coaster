@@ -82,6 +82,18 @@ export function buildSegments(design: Pick<TrackDesign, 'nodes' | 'closed'>): He
     kEnd.push(curvatureFrom(v1, cubicEndAccel(a.p, v0, b.p, v1, true, v3()), v3()));
   }
 
+  // A segment is straight when both end directions agree and lie along the chord. A straight
+  // segment must stay straight: a node next to one gets zero curvature, otherwise the bend of the
+  // neighbouring segment would bleed in and make the straight sag or wander.
+  const straight: boolean[] = [];
+  for (let s = 0; s < count; s++) {
+    const a = at(s);
+    const b = at(s + 1);
+    sub(tmp, b.p, a.p);
+    const chord = len(tmp);
+    straight.push(chord > 1e-6 && dot(a.dir, b.dir) > 0.99999 && dot(tmp, a.dir) / chord > 0.99999);
+  }
+
   // Shared curvature at each node: average of incoming and outgoing estimates.
   const nodeK: V3[] = [];
   for (let i = 0; i < n; i++) {
@@ -98,6 +110,7 @@ export function buildSegments(design: Pick<TrackDesign, 'nodes' | 'closed'>): He
       w++;
     }
     if (w > 0) scale(k, k, 1 / w);
+    if ((outSeg >= 0 && straight[outSeg]) || (inSeg >= 0 && inSeg < count && straight[inSeg])) scale(k, k, 0);
     // Remove any tangential component so the curvature is perpendicular to the node direction.
     const d = at(i).dir;
     addScaled(k, k, d, -dot(k, d));

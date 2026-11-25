@@ -1,6 +1,6 @@
 import type { V3 } from '../core/vec3';
 import { autoBank } from './elements';
-import { separateCrossings } from './clearance';
+import { separateCrossings, worstGap } from './clearance';
 import type { TrackDesign, TrackNode } from './types';
 
 /**
@@ -14,17 +14,24 @@ import type { TrackDesign, TrackNode } from './types';
  * left disconnected.
  */
 
-type Seg = { kind: 'L' | 'R' | 'S'; len: number };
+export type Seg = { kind: 'L' | 'R' | 'S'; len: number };
 
 const TAU = Math.PI * 2;
-const mod2pi = (a: number) => ((a % TAU) + TAU) % TAU;
+/** Angle in [0, 2π), with anything within a hair of 2π treated as 0 (rounding must never add a full circle). */
+const mod2pi = (a: number) => {
+  const m = ((a % TAU) + TAU) % TAU;
+  return m > TAU - 1e-7 ? 0 : m;
+};
 
-interface Pose {
+export interface Pose {
   x: number;
   z: number;
   /** Heading in the x–z plane, radians, 0 = +X, positive = turning left (towards −Z). */
   h: number;
 }
+
+/** Rounding can push an exact zero slightly negative; treat it as zero. */
+const clampTiny = (v: number) => (v < 0 && v > -1e-9 ? 0 : v);
 
 /** Shortest Dubins path between poses with radius R. Returns segments with lengths in metres. */
 export function dubins(a: Pose, b: Pose, R: number): Seg[] {
@@ -44,7 +51,7 @@ export function dubins(a: Pose, b: Pose, R: number): Seg[] {
   const cands: Array<[string, number, number, number]> = [];
   // LSL
   {
-    const p2 = 2 + D * D - 2 * cab + 2 * D * (sa - sb);
+    const p2 = clampTiny(2 + D * D - 2 * cab + 2 * D * (sa - sb));
     if (p2 >= 0) {
       const tmp = Math.atan2(cb - ca, D + sa - sb);
       cands.push(['LSL', mod2pi(-alpha + tmp), Math.sqrt(p2), mod2pi(beta - tmp)]);
@@ -52,7 +59,7 @@ export function dubins(a: Pose, b: Pose, R: number): Seg[] {
   }
   // RSR
   {
-    const p2 = 2 + D * D - 2 * cab + 2 * D * (sb - sa);
+    const p2 = clampTiny(2 + D * D - 2 * cab + 2 * D * (sb - sa));
     if (p2 >= 0) {
       const tmp = Math.atan2(ca - cb, D - sa + sb);
       cands.push(['RSR', mod2pi(alpha - tmp), Math.sqrt(p2), mod2pi(-beta + tmp)]);
@@ -60,7 +67,7 @@ export function dubins(a: Pose, b: Pose, R: number): Seg[] {
   }
   // LSR
   {
-    const p2 = -2 + D * D + 2 * cab + 2 * D * (sa + sb);
+    const p2 = clampTiny(-2 + D * D + 2 * cab + 2 * D * (sa + sb));
     if (p2 >= 0) {
       const p = Math.sqrt(p2);
       const tmp = Math.atan2(-ca - cb, D + sa + sb) - Math.atan2(-2, p);
@@ -69,7 +76,7 @@ export function dubins(a: Pose, b: Pose, R: number): Seg[] {
   }
   // RSL
   {
-    const p2 = D * D - 2 + 2 * cab - 2 * D * (sa + sb);
+    const p2 = clampTiny(D * D - 2 + 2 * cab - 2 * D * (sa + sb));
     if (p2 >= 0) {
       const p = Math.sqrt(p2);
       const tmp = Math.atan2(ca + cb, D - sa - sb) - Math.atan2(2, p);
@@ -111,13 +118,18 @@ export function returnNodes(design: TrackDesign, opt: ReturnOptions): TrackNode[
   // If the return can't be lifted clear of the player's track (say it would have to thread
   // through a loop), try wider paths and keep the first that is clear of everything.
   const radii = opt.radius ? [R] : [R, R * 1.5, R * 2.2, R * 0.7];
-  let fallback: TrackNode[] | null = null;
-  for (const r of radii) {
-    const { out, clear } = returnPath(design, opt, r);
-    if (clear) return out;
-    fallback ??= out;
-  }
-  return fallback!;
+  // Lining up further back from the station leaves room to climb over low track near the platform.
+  const brakes = opt.brakeLength ? [opt.brakeLength] : [26, 44, 64];
+  // If nothing is fully clear (a very busy layout), keep the route with the most room.
+  let best: { out: TrackNode[]; gap: number } | null = null;
+  for (const brakeLength of brakes)
+    for (const r of radii) {
+      const { out, clear } = returnPath(design, { ...opt, brakeLength }, r);
+      if (clear) return out;
+      const gap = worstGap({ ...design, nodes: [...design.nodes, ...out], closed: true });
+      if (!best || gap > best.gap) best = { out, gap };
+    }
+  return best!.out;
 }
 
 function returnPath(design: TrackDesign, opt: ReturnOptions, R: number): { out: TrackNode[]; clear: boolean } {
@@ -173,7 +185,11 @@ function returnPath(design: TrackDesign, opt: ReturnOptions, R: number): { out: 
       const ease = u * u * (3 - 2 * u);
       const slopeCarry = Math.tan(startPitch) * total * (u - 2 * u * u + u * u * u);
       let y = y0 + (y1 - y0) * ease + slopeCarry;
-      y = Math.max(y, opt.groundAt(x, z) + 1.1);
+      // Clear the ground here and on the way here (terrain can rise between nodes).
+      const px = out.length ? out[out.length - 1]!.p[0] : last.p[0];
+      const pz = out.length ? out[out.length - 1]!.p[2] : last.p[2];
+      const g = Math.max(opt.groundAt(x, z), opt.groundAt((x + px) / 2, (z + pz) / 2), opt.groundAt(x * 0.75 + px * 0.25, z * 0.75 + pz * 0.25), opt.groundAt(x * 0.25 + px * 0.75, z * 0.25 + pz * 0.75));
+      y = Math.max(y, g + 1.3);
       const nextKind = segs[si]!.kind;
       const bank = wind + first.bank + (nextKind === 'S' ? 0 : (nextKind === 'L' ? -1 : 1) * bankMag * Math.min(1, Math.sin(Math.PI * Math.min(1, (k + 1) / n)) * 3));
       out.push({ id: `ret_${si}_${k}`, p: [x, y, z], dir: [Math.cos(h), 0, -Math.sin(h)], bank, kind: 'track', group: 'return' });
@@ -208,7 +224,7 @@ function returnPath(design: TrackDesign, opt: ReturnOptions, R: number): { out: 
   // The return must never pass through the player's track: lift it over (or under) crossings.
   // The final brake run into the station stays level.
   const temp: TrackDesign = { ...design, nodes: [...design.nodes.map((n) => ({ ...n, p: [...n.p] as V3, dir: [...n.dir] as V3 })), ...out], closed: true };
-  const clear = separateCrossings(temp, design.nodes.length, opt.groundAt, 2);
+  const clear = separateCrossings(temp, design.nodes.length, opt.groundAt, 2, true);
   // A trim brake halfway round keeps very fast layouts from arriving too quickly.
   const mid = out[Math.floor(out.length * 0.6)];
   if (mid && mid !== out[out.length - 1]) {

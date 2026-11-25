@@ -11,7 +11,7 @@ import type { BuildMaterial, BuildSound, CoasterAudioState, EnvironmentAudioStat
 import { Ambience } from './ambience';
 import { CoasterAudio } from './coaster-audio';
 import { Music } from './music';
-import { BUILD_RECIPES, GrowthTexture, UI_RECIPES, type RecipeEntry } from './sounds';
+import { BUILD_RECIPES, PIECE_RECIPES, type PieceSound, GrowthTexture, UI_RECIPES, type RecipeEntry } from './sounds';
 import { RateLimiter, SmoothParam, VoiceLimiter, clamp01, createNoiseBank, type NoiseBank } from './synth';
 
 export type { BuildMaterial, BuildSound, CoasterAudioState, EnvironmentAudioState, UiSound, Volumes } from './types';
@@ -197,6 +197,11 @@ export class AudioEngine {
 
   build(material: BuildMaterial, sound: BuildSound): void {
     this.oneShot(`build:${sound}`, BUILD_RECIPES[material][sound], 'construction');
+  }
+
+  /** A sound for the kind of piece just added in edit mode (ratchet for climbs, whoosh for drops…). */
+  piece(sound: PieceSound): void {
+    this.oneShot(`piece:${sound}`, PIECE_RECIPES[sound], 'construction');
   }
 
   supportGrowth(active: boolean, material: BuildMaterial): void {

@@ -13,6 +13,7 @@ import type { TrackDesign } from './types';
 export const MIN_VERTICAL = 5.5;
 /** Track centres closer than this in plan view count as the same space (train width plus margin). */
 export const PLAN_RADIUS = 2.6;
+const DETECT_RADIUS = PLAN_RADIUS + 0.7;
 const WINDOW = 28;
 
 interface Conflict {
@@ -35,7 +36,25 @@ function arcSep(a: number, b: number, track: BakedTrack): number {
  * that is more than `minArc` metres away along the track. Points in the protected tail (from arc
  * position `protectFromS`) are never moved: their partner moves instead.
  */
-export function findClashes(design: TrackDesign, fromIndex: number, ground: (x: number, z: number) => number, protectTail = 0, minArc = 30): { baked: BakedTrack; conflicts: Conflict[] } {
+/** Smallest vertical gap between track points close in plan view and far apart along the circuit. */
+export function worstGap(design: TrackDesign): number {
+  const t = new BakedTrack(design, 0.5);
+  let worst = Infinity;
+  for (let i = 0; i < t.count; i += 2)
+    for (let j = i + 2; j < t.count; j += 2) {
+      let ds = (j - i) * t.ds;
+      if (t.closed) ds = Math.min(ds, t.length - ds);
+      if (ds < 30) continue;
+      const dx = t.pos[i * 3]! - t.pos[j * 3]!;
+      const dz = t.pos[i * 3 + 2]! - t.pos[j * 3 + 2]!;
+      if (dx * dx + dz * dz > PLAN_RADIUS * PLAN_RADIUS) continue;
+      worst = Math.min(worst, Math.abs(t.pos[i * 3 + 1]! - t.pos[j * 3 + 1]!));
+    }
+  return worst;
+}
+
+export function findClashes(design: TrackDesign, fromIndex: number, ground: (x: number, z: number) => number, protectTail = 0, minArc = 30): { baked: BakedTrack; conflicts: Conflict[]; unresolved: boolean } {
+  let unresolved = false;
   const baked = new BakedTrack(design, 0.5);
   const sJoin = baked.nodeS[Math.max(0, fromIndex - 1)] ?? 0;
   const protectIdx = design.nodes.length - protectTail;
@@ -65,27 +84,36 @@ export function findClashes(design: TrackDesign, fromIndex: number, ground: (x: 
           if (arcSep(si, sj, baked) < minArc) continue;
           const dx = baked.pos[j * 3]! - x;
           const dz = baked.pos[j * 3 + 2]! - z;
-          if (dx * dx + dz * dz > PLAN_RADIUS * PLAN_RADIUS) continue;
+          // Samples are 1 m apart, so a crossing at an angle can fall between them: detect with a margin.
+          if (dx * dx + dz * dz > DETECT_RADIUS * DETECT_RADIUS) continue;
           const yj = baked.pos[j * 3 + 1]!;
           if (Math.abs(y - yj) >= MIN_VERTICAL) continue;
           // Decide which point moves: only new, unprotected track moves; prefer the later one.
           const nI = isNew(si);
           const nJ = isNew(sj);
-          if (!nI && !nJ) continue; // a clash in existing track is not ours to change
+          if (!nI && !nJ) {
+            // Neither point may move. If one is ours (in the protected tail), the clash can't be fixed
+            // from here: report it so the caller can try another way.
+            if ((si >= sJoin || sj >= sJoin) && protectTail > 0) unresolved = true;
+            continue;
+          }
           const [mover, other, my, oy] = nJ ? [j, i, yj, y] : [i, j, y, yj];
           void other;
           const mx = baked.pos[mover * 3]!;
           const mz = baked.pos[mover * 3 + 2]!;
-          const under = oy - MIN_VERTICAL - 0.2;
-          const canUnder = my < oy && under >= ground(mx, mz) + 1.4;
-          const lift = canUnder ? under - my : oy + MIN_VERTICAL + 0.2 - my;
+          // Go whichever way needs the smaller change; on a near tie prefer going under (gentler,
+          // and it keeps descending track descending), as long as there's room above the ground.
+          const dUnder = oy - MIN_VERTICAL - 0.2 - my;
+          const dOver = oy + MIN_VERTICAL + 0.2 - my;
+          const canUnder = my + dUnder >= ground(mx, mz) + 1.4;
+          const lift = canUnder && Math.abs(dUnder) <= Math.abs(dOver) + 1 ? dUnder : dOver;
           const prev = bySample.get(mover) ?? 0;
           if (Math.abs(lift) > Math.abs(prev)) bySample.set(mover, lift);
         }
       }
   }
   const conflicts: Conflict[] = [...bySample.entries()].map(([i, lift]) => ({ s: i * baked.ds, lift }));
-  return { baked, conflicts };
+  return { baked, conflicts, unresolved };
 }
 
 /**
@@ -93,10 +121,10 @@ export function findClashes(design: TrackDesign, fromIndex: number, ground: (x: 
  * `protectTail` nodes at the end are kept in place (e.g. the brake run entering the station).
  * Returns true when the result is clash-free.
  */
-export function separateCrossings(design: TrackDesign, fromIndex: number, ground: (x: number, z: number) => number, protectTail = 0): boolean {
+export function separateCrossings(design: TrackDesign, fromIndex: number, ground: (x: number, z: number) => number, protectTail = 0, bendSteep = false): boolean {
   for (let iter = 0; iter < 6; iter++) {
-    const { baked, conflicts } = findClashes(design, fromIndex, ground, protectTail);
-    if (conflicts.length === 0) return true;
+    const { baked, conflicts, unresolved } = findClashes(design, fromIndex, ground, protectTail);
+    if (conflicts.length === 0) return !unresolved;
     const last = design.nodes.length - protectTail;
     for (let i = fromIndex; i < last; i++) {
       const sNode = baked.nodeS[i] ?? baked.length;
@@ -114,20 +142,22 @@ export function separateCrossings(design: TrackDesign, fromIndex: number, ground
       const n = design.nodes[i]!;
       // Banks can carry whole turns after a roll: compare the wrapped angle.
       const wrapped = Math.atan2(Math.sin(n.bank), Math.cos(n.bank));
-      const complex = Math.abs(n.dir[1]) > 0.6 || Math.abs(wrapped) > 1.2;
-      if (lift !== 0 && !complex) n.p[1] += lift * 1.08;
+      // (The automatic return has no elements, only its own slopes, so it may bend steep track.)
+      const complex = (!bendSteep && Math.abs(n.dir[1]) > 0.6) || Math.abs(wrapped) > 1.2;
+      if (lift !== 0 && !complex) n.p[1] = Math.max(n.p[1] + lift * 1.08, ground(n.p[0], n.p[2]) + 1.3);
     }
     // Keep slopes consistent with the new heights.
     for (let i = fromIndex; i < last; i++) {
       const prev = design.nodes[i - 1];
       const next = design.nodes[i + 1] ?? (design.closed ? design.nodes[0] : undefined);
       const n = design.nodes[i]!;
-      if (!prev || !next || Math.abs(n.dir[1]) > 0.6) continue; // leave steep/looping elements alone
+      if (!prev || !next || (!bendSteep && Math.abs(n.dir[1]) > 0.6)) continue; // leave steep/looping elements alone
       const run = Math.hypot(next.p[0] - prev.p[0], next.p[2] - prev.p[2]) || 1;
       const pitch = Math.atan2(next.p[1] - prev.p[1], run) * 0.85;
       const h = Math.atan2(-n.dir[2], n.dir[0]);
       n.dir = [Math.cos(h) * Math.cos(pitch), Math.sin(pitch), -Math.sin(h) * Math.cos(pitch)];
     }
   }
-  return findClashes(design, fromIndex, ground, protectTail).conflicts.length === 0;
+  const last = findClashes(design, fromIndex, ground, protectTail);
+  return last.conflicts.length === 0 && !last.unresolved;
 }

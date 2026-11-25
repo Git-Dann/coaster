@@ -1250,3 +1250,197 @@
   border-radius: 50%;
   box-shadow: inset 0 0 0 1px rgba(52, 60, 55, 0.16);
 }
+
+/* ---------- Edit mode: construction panel ---------- */
+.cc-build {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 2px 16px 0;
+}
+.cc-seg {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 18px;
+  background: rgba(230, 215, 193, 0.45);
+}
+.cc-seg button {
+  min-height: 58px;
+  border: none;
+  border-radius: 14px;
+  background: transparent;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 2px;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: var(--fw-bold);
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.cc-seg button.on {
+  background: var(--charcoal);
+  color: #fbf6ee;
+}
+.cc-seg button:active {
+  transform: scale(0.97);
+}
+.cc-build-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 16px;
+}
+.cc-build-hint {
+  margin: 0;
+  padding: 0 18px;
+  font-size: var(--fs-sm, 0.85rem);
+  color: var(--ink-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cc-add-btn {
+  white-space: nowrap;
+  flex: 1;
+  justify-content: center;
+  max-width: 240px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 52px;
+  padding: 0 20px;
+  border: none;
+  border-radius: var(--r-pill);
+  background: var(--terracotta, #c97b5f);
+  color: #fffaf3;
+  font: inherit;
+  font-weight: var(--fw-bold);
+  font-size: 1rem;
+  box-shadow: var(--e2);
+  cursor: pointer;
+}
+.cc-add-btn:disabled {
+  opacity: 0.5;
+}
+.cc-add-btn:active {
+  transform: scale(0.97);
+}
+@media (max-width: 380px) {
+  .cc-seg button span {
+    font-size: 0.66rem;
+  }
+  .cc-add-btn {
+    padding: 0 12px;
+  }
+  .cc-build-actions .cc-pill-btn {
+    padding: 0 10px;
+  }
+}
+/* Landscape phones: a compact construction panel so Remove and Add piece always fit on screen. */
+@media (max-height: 520px) and (orientation: landscape) {
+  .cc-tray {
+    padding: 8px 0;
+    gap: 6px;
+  }
+  .cc-seg button {
+    min-height: 42px;
+    font-size: 0.66rem;
+  }
+  .cc-seg button svg {
+    width: 20px;
+    height: 20px;
+  }
+  .cc-tray .cc-card.small {
+    width: 58px;
+    min-height: 54px;
+    gap: 2px;
+    padding: 4px 2px;
+  }
+  .cc-tray .cc-card.small svg {
+    width: 18px;
+    height: 18px;
+  }
+  .cc-build-hint {
+    font-size: 0.75rem;
+  }
+  .cc-add-btn {
+    min-height: 42px;
+  }
+  .cc-build-actions .cc-pill-btn {
+    min-height: 40px;
+  }
+}
+/* Edit mode header: piece navigation and Done. */
+.cc-build-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px;
+}
+.cc-build-head .cc-round {
+  width: 40px;
+  height: 40px;
+}
+.cc-build-head .cc-round:disabled {
+  opacity: 0.35;
+}
+.cc-build-title {
+  flex: 1;
+  min-width: 0;
+  font-weight: var(--fw-bold);
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cc-pill-btn.small {
+  min-height: 40px;
+  padding: 0 12px;
+  font-size: 0.85rem;
+}
+.cc-pill-btn.done {
+  background: var(--charcoal);
+  color: #fbf6ee;
+}
+.cc-seg button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+@media (max-height: 520px) and (orientation: landscape) {
+  .cc-build-head .cc-round {
+    width: 34px;
+    height: 34px;
+  }
+  .cc-pill-btn.small {
+    min-height: 34px;
+  }
+}
+
+.cc-build-note {
+  margin: 0;
+  padding: 0 18px;
+  font-size: 0.78rem;
+  color: var(--forest, #55745b);
+  font-weight: var(--fw-bold);
+}
+
+/* Small section headings inside a sheet (Ride: "Ride along", "View and more", "Speed"). */
+.cc-tray-heading {
+  margin: 2px 0 -2px;
+  padding: 0 18px;
+  font-size: 0.74rem;
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.02em;
+  color: var(--ink-soft, #6b6257);
+}
+.cc-tray-heading.inline {
+  margin: 0;
+  padding: 0 4px 0 6px;
+}

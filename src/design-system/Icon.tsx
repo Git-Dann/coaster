@@ -23,6 +23,8 @@ const P: Record<string, string> = {
   link: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1',
   trash: 'M5 7h14M9 7V4.5h6V7M7 7l1 13h8l1-13',
   up: 'M12 19V5M6 11l6-6 6 6',
+  left: 'M15 5l-7 7 7 7',
+  right: 'M9 5l7 7-7 7',
   down: 'M12 5v14M6 13l6 6 6-6',
   frame: 'M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5',
   leaf: 'M5 19c0-8 5-14 14-14 0 9-6 14-14 14zM5 19l7-7',

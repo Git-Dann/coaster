@@ -57,10 +57,21 @@ export function Welcome() {
             onClick={() => {
               g().newWorld({ blank: true });
               useGame.setState({ overlay: 'none', panel: 'build' });
-              g().toast('Tap a piece to add it. Your track always joins back up to the station.');
+              g().toast('Pick a piece and tap Add piece. Your track always joins back up to the station.');
             }}
           >
             {returning ? 'Start a new coaster' : 'Build your own coaster'}
+          </Button>
+          <Button
+            icon="plus"
+            wide
+            onClick={() => {
+              g().newWorld({ blank: true, empty: true });
+              useGame.setState({ overlay: 'none', panel: 'build' });
+              g().toast('Just the station. Pick a piece and tap Add piece to start your track.');
+            }}
+          >
+            Start blank (just the station)
           </Button>
           <Button
             icon="ride"
@@ -108,7 +119,7 @@ export function MenuDialog() {
           icon="plus"
           wide
           onClick={() => {
-            useGame.getState().newWorld({ blank: true });
+            useGame.getState().newWorld({ blank: true, empty: true });
             useGame.setState({ overlay: 'none', panel: 'build' });
           }}
         >
