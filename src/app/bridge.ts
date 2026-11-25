@@ -120,6 +120,7 @@ export function refreshGhost(): void {
           const r = replacePiece(g.design, piece.group, g.buildChoice, ground, e.track);
           const first = planNext(base, g.buildChoice, ground, e.track);
           pendingEdit = { design: r.design, index: k };
+          pendingPieceEnd = first.design.nodes.length - 1;
           dropped = r.dropped;
           height = first.height;
           crossing = first.crossing;
@@ -132,10 +133,11 @@ export function refreshGhost(): void {
           height = endNode.p[1] - ground(endNode.p[0], endNode.p[2]);
           e.setPreview(g.design, { fromNode: piece.start - 1, toNode: piece.end });
         }
-        const at = g.design.nodes[piece.end]!.p;
-        e.setGrid(gridFrame(g.design), at);
-        const from = g.design.nodes[Math.max(0, piece.start - 1)]!.p;
-        e.lookAt([(from[0] + at[0]) / 2, (from[1] + at[1]) / 2, (from[2] + at[2]) / 2], choiceDistance(g.buildChoice));
+        // Frame the piece as it will be (the new shape when changed), not where the old one was.
+        const shown = pendingEdit ? pendingEdit.design : g.design;
+        const lastNode = pendingEdit ? Math.min(shown.nodes.length - 1, pendingPieceEnd) : piece.end;
+        e.setGrid(gridFrame(shown), shown.nodes[lastNode]!.p);
+        frameNodes(e, shown, piece.start - 1, lastNode, g.buildChoice);
         useGame.setState({ ghost: { height, atGround, crossing, downBlocked: !!down?.atGround, changed, dropped, forChoice: JSON.stringify(g.buildChoice), blocked } });
         return;
       }
@@ -145,10 +147,9 @@ export function refreshGhost(): void {
       const down = g.buildChoice.kind === 'track' ? planNext(g.design, { ...g.buildChoice, slope: -1 }, ground, e.track) : null;
       const nodes = ghostPlan.design.nodes;
       const end = nodes[nodes.length - 1]!;
-      const from = nodes[ghostPlan.start - 1] ?? end;
       e.setPreview(ghostPlan.design);
       e.setGrid(gridFrame(ghostPlan.design), end.p);
-      e.lookAt([(from.p[0] + end.p[0]) / 2, (from.p[1] + end.p[1]) / 2, (from.p[2] + end.p[2]) / 2], choiceDistance(g.buildChoice));
+      frameNodes(e, ghostPlan.design, ghostPlan.start - 1, nodes.length - 1, g.buildChoice);
       useGame.setState({ ghost: { height: ghostPlan.height, atGround: ghostPlan.atGround, crossing: ghostPlan.crossing, downBlocked: !!down?.atGround, changed: true, dropped: 0, forChoice: JSON.stringify(g.buildChoice), blocked: ghostPlan.blocked } });
     } catch (err) {
       // Never let a planning problem break the game: just show no ghost for this choice.
@@ -238,6 +239,36 @@ export function refreshAvailability(): void {
     useGame.setState({ avail: { specials, track, note }, ...(next ? { buildChoice: next } : {}) });
   };
   requestAnimationFrame(step);
+}
+
+let pendingPieceEnd = 0;
+
+/**
+ * Point the edit view at a piece (nodes `from`..`to`): centred on it, and far enough back that the
+ * whole piece fits, however big it is.
+ */
+function frameNodes(e: Engine, d: TrackDesign, from: number, to: number, c: BuildChoice): void {
+  const a = Math.max(0, from);
+  const b = Math.max(a, Math.min(d.nodes.length - 1, to));
+  let x = 0;
+  let y = 0;
+  let z = 0;
+  for (let i = a; i <= b; i++) {
+    const p = d.nodes[i]!.p;
+    x += p[0];
+    y += p[1];
+    z += p[2];
+  }
+  const n = b - a + 1;
+  const centre: V3 = [x / n, y / n, z / n];
+  let radius = 0;
+  for (let i = a; i <= b; i++) {
+    const p = d.nodes[i]!.p;
+    radius = Math.max(radius, Math.hypot(p[0] - centre[0], p[1] - centre[1], p[2] - centre[2]));
+  }
+  e.previewFocus = d.nodes[b]!.p;
+  // A little extra for the bulge of curves between nodes and the supports below.
+  e.frameSphere(centre, radius + 3, choiceDistance(c) * 0.7);
 }
 
 /** Camera distance for the edit view: specials are taller, so stand back a little. */

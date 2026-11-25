@@ -213,10 +213,11 @@ export class Engine {
       dragEnd: (x, y, c) => this.dragEnd(x, y, c),
       tap: (x, y) => this.cb.onTap(this.pick(x, y)),
       hover: () => {},
-      orbit: (dx, dy) => this.rig.orbitBy(dx, dy, this.canvas.clientHeight),
-      pan: (dx, dy) => this.rig.panBy(dx, dy, this.canvas.clientHeight),
-      zoom: (f) => this.rig.zoomBy(f),
-      rotate: (da) => (this.rig.yaw += da),
+      // Moving the camera yourself always wins: no automatic re-fit afterwards.
+      orbit: (dx, dy) => ((this.lastFrame = null), this.rig.orbitBy(dx, dy, this.canvas.clientHeight)),
+      pan: (dx, dy) => ((this.lastFrame = null), this.rig.panBy(dx, dy, this.canvas.clientHeight)),
+      zoom: (f) => ((this.lastFrame = null), this.rig.zoomBy(f)),
+      rotate: (da) => ((this.lastFrame = null), (this.rig.yaw += da)),
       interact: () => {
         void this.audio.unlock();
         if (this.rig.mode === 'relax' && !(this.settings?.accessibility.disableAutoCamera ?? false)) {
@@ -320,8 +321,12 @@ export class Engine {
   }
 
   /** Show a translucent preview of proposed track (or clear it). Committed geometry is untouched. */
+  /** The end of the piece the edit view is showing (new or selected), for checks and tests. */
+  previewFocus: V3 | null = null;
+
   setPreview(design: TrackDesign | null, range?: { fromNode: number; toNode: number }): void {
     this.previewDesign = design;
+    if (!design) this.previewFocus = null;
     if (!design || design.nodes.length < 2) {
       this.previewTrack = null;
       this.previewRenderer.update(null, 'tubular');
@@ -590,8 +595,18 @@ export class Engine {
    * what they look at in the clear area between them, instead of behind the build sheet.
    */
   setViewInsets(top: number, bottom: number, left = 0, right = 0): void {
-    this.insets = { top: Math.max(0, top), bottom: Math.max(0, bottom), left: Math.max(0, left), right: Math.max(0, right) };
+    const next = { top: Math.max(0, top), bottom: Math.max(0, bottom), left: Math.max(0, left), right: Math.max(0, right) };
+    const old = this.insets;
+    const moved = Math.abs(next.top - old.top) + Math.abs(next.bottom - old.bottom) + Math.abs(next.left - old.left) + Math.abs(next.right - old.right) > 24;
+    this.insets = next;
+    // A panel opened or closed after a piece was framed: fit it again to the new clear area.
+    // Only just after the view framed a piece (the panel was still opening), and never once
+    // you've moved the camera yourself.
+    const f = this.lastFrame;
+    if (moved && f && this.buildMode && performance.now() - f.at < 2000) this.frameSphere(f.centre, f.radius, f.min, f.at);
   }
+
+  private lastFrame: { centre: V3; radius: number; min: number; at: number } | null = null;
 
   /** Shift the projection so the camera's aim point sits in the middle of the clear area. */
   private applyViewOffset(): void {
@@ -611,6 +626,25 @@ export class Engine {
     this.appliedOffsetX = nx;
     if (Math.abs(ny) < 0.5 && Math.abs(nx) < 0.5) cam.clearViewOffset();
     else cam.setViewOffset(w, h, nx, ny, w, h);
+  }
+
+  /**
+   * Glide the build camera so a sphere (a piece of track) fits in the clear part of the screen,
+   * the area not covered by the panels: centred there, and far enough back that it all shows.
+   */
+  frameSphere(centre: V3, radius: number, minDistance = 30, at = performance.now()): void {
+    this.lastFrame = { centre, radius, min: minDistance, at };
+    if (this.rig.mode !== 'orbit') return;
+    const w = Math.max(1, this.canvas.clientWidth);
+    const h = Math.max(1, this.canvas.clientHeight);
+    const margin = 28;
+    const clearW = Math.max(80, w - this.insets.left - this.insets.right - margin * 2);
+    const clearH = Math.max(80, h - this.insets.top - this.insets.bottom - margin * 2);
+    const tanHalf = Math.tan(THREE.MathUtils.degToRad(this.rig.camera.fov) / 2);
+    // Half-angles of the clear area, vertically and across.
+    const half = Math.atan(Math.min(tanHalf * (clearH / h), tanHalf * (clearW / h)));
+    const distance = THREE.MathUtils.clamp(radius / Math.sin(Math.max(0.05, half)), minDistance, 320);
+    this.rig.focusOn(new THREE.Vector3(centre[0], centre[1], centre[2]), distance);
   }
 
   /** Smoothly move the build camera to look at a point, keeping the current zoom. */
