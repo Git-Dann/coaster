@@ -37,7 +37,9 @@ test('launches straight into the world with a working starter coaster', async ({
   expect(size).toBeGreaterThan(50_000);
   const s0 = await page.evaluate(() => (window as any).__cozy.engine.sim.s);
   await page.getByRole('button', { name: 'Take a ride' }).click();
-  await page.waitForTimeout(4000);
+  // The train must get moving. Simulation time is bounded per frame, so on CI's CPU renderer it runs
+  // slower than wall time: wait for the movement instead of a fixed number of seconds.
+  await page.waitForFunction((start) => Math.abs((window as any).__cozy.engine.sim.s - start) > 1, s0, { timeout: 30_000 });
   const s1 = await page.evaluate(() => (window as any).__cozy.engine.sim.s);
   expect(Math.abs(s1 - s0)).toBeGreaterThan(1);
   await page.screenshot({ path: `test-results/visual/${test.info().project.name}-ride.png` });
