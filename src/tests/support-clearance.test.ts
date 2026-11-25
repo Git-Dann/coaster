@@ -19,10 +19,25 @@ function worstIntrusion(track: BakedTrack, members: Member[]): { count: number; 
   const E = TRAIN_ENVELOPE;
   let count = 0;
   let first: string | undefined;
+  // Every track sample (0.25 m apart) in a 2 m grid, so the brute force stays fast.
+  const grid = new Map<string, number[]>();
+  const key = (x: number, z: number) => `${Math.floor(x / 2)},${Math.floor(z / 2)}`;
+  for (let i = 0; i < track.count; i++) {
+    const k = key(track.pos[i * 3]!, track.pos[i * 3 + 2]!);
+    let l = grid.get(k);
+    if (!l) grid.set(k, (l = []));
+    l.push(i);
+  }
+  const near = (x: number, z: number, r: number): number[] => {
+    const out: number[] = [];
+    for (let gx = Math.floor((x - r) / 2); gx <= Math.floor((x + r) / 2); gx++)
+      for (let gz = Math.floor((z - r) / 2); gz <= Math.floor((z + r) / 2); gz++) out.push(...(grid.get(`${gx},${gz}`) ?? []));
+    return out;
+  };
   const nearestS = (p: readonly number[]) => {
     let best = Infinity;
     let s = 0;
-    for (let i = 0; i < track.count; i++) {
+    for (const i of near(p[0]!, p[2]!, 6)) {
       const d = (track.pos[i * 3]! - p[0]!) ** 2 + (track.pos[i * 3 + 1]! - p[1]!) ** 2 + (track.pos[i * 3 + 2]! - p[2]!) ** 2;
       if (d < best) [best, s] = [d, i * track.ds];
     }
@@ -37,9 +52,9 @@ function worstIntrusion(track: BakedTrack, members: Member[]): { count: number; 
     for (let k = 0; k <= n && !hit; k++) {
       const u = k / n;
       const q = [0, 1, 2].map((c) => m.a[c]! + (m.b[c]! - m.a[c]!) * u);
-      for (let i = 0; i < track.count && !hit; i++) {
+      for (const i of near(q[0]!, q[2]!, 4)) {
         const d = [0, 1, 2].map((c) => q[c]! - track.pos[i * 3 + c]!);
-        if (Math.abs(d[0]!) > 5 || Math.abs(d[1]!) > 5 || Math.abs(d[2]!) > 5) continue;
+        if (Math.abs(d[1]!) > 5) continue;
         const T = [0, 1, 2].map((c) => track.tan[i * 3 + c]!);
         const U = [0, 1, 2].map((c) => track.up[i * 3 + c]!);
         const R = [T[1]! * U[2]! - T[2]! * U[1]!, T[2]! * U[0]! - T[0]! * U[2]!, T[0]! * U[1]! - T[1]! * U[0]!];
@@ -53,7 +68,8 @@ function worstIntrusion(track: BakedTrack, members: Member[]): { count: number; 
         if (up > -below && up < E.above) {
           hit = true;
           count++;
-          first ??= `${m.key} (${m.kind}) at s=${(i * track.ds).toFixed(1)} self=${selfS.toFixed(1)} up=${up.toFixed(2)} lat=${dot(R).toFixed(2)} along=${dot(T).toFixed(2)} a=${m.a.map((v) => v.toFixed(1))} b=${m.b.map((v) => v.toFixed(1))}`;
+          first ??= `${m.key} (${m.kind}) at s=${(i * track.ds).toFixed(1)} self=${selfS.toFixed(1)} up=${up.toFixed(2)} lat=${dot(R).toFixed(2)}`;
+          break;
         }
       }
     }

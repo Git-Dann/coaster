@@ -407,7 +407,8 @@ describe('long-duration operation', () => {
       expect(Math.hypot(...smp.up)).toBeCloseTo(1, 6);
       expect(smp.up[0] * smp.tan[0] + smp.up[1] * smp.tan[1] + smp.up[2] * smp.tan[2]).toBeCloseTo(0, 6);
     }
-  });
+    // 20 simulated minutes: ~4 s alone, longer when the suite runs in parallel on CI.
+  }, 30_000);
 });
 
 describe('origin independence', () => {
