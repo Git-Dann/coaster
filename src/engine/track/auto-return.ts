@@ -126,40 +126,62 @@ export function returnNodes(design: TrackDesign, opt: ReturnOptions): TrackNode[
   const radii = opt.radius ? [R] : [R, R * 1.5, R * 2.2, R * 0.7];
   // Lining up further back from the station leaves room to climb over low track near the platform.
   const brakes = opt.brakeLength ? [opt.brakeLength] : [26, 44, 64];
+  // A sensible boundary: the return shouldn't wander off across the map to get home. About 2.4 times
+  // the straight-line distance back to the station, plus room for one turnaround.
+  const first = design.nodes[0]!;
+  const last = design.nodes[design.nodes.length - 1]!;
+  const straight = Math.hypot(last.p[0] - first.p[0], last.p[2] - first.p[2]);
+  const maxLen = Math.max(220, straight * 2.4 + 2 * Math.PI * R + 60);
+  const lengthOf = (out: TrackNode[]) => {
+    let len = 0;
+    let p = last.p;
+    for (const n of out) {
+      len += Math.hypot(n.p[0] - p[0], n.p[1] - p[1], n.p[2] - p[2]);
+      p = n.p;
+    }
+    return len;
+  };
+  // Every route that is clear of everything, with how long it is and how hard it rides.
+  const clearRoutes: Array<{ out: TrackNode[]; len: number; g: number }> = [];
   // If nothing is fully clear (a very busy layout), keep the route with the most room.
   let best: { out: TrackNode[]; gap: number } | null = null;
-  // Among routes that are clear of everything, prefer one that rides comfortably: the first one
-  // under the limit wins, otherwise the gentlest clear one.
-  let gentlest: { out: TrackNode[]; g: number } | null = null;
-  const tryPath = (o: ReturnOptions & { brakeLength: number }, r: number): TrackNode[] | null => {
+  // Returns true when this route is good enough to stop looking (clear, comfortable, within bounds),
+  // or when enough routes have been tried and one inside the boundary is clear (a fixed count, not
+  // a time limit, so the same coaster always gets the same return).
+  let tried = 0;
+  const tryPath = (o: ReturnOptions & { brakeLength: number }, r: number): boolean => {
+    tried++;
     const { out, clear } = returnPath(design, o, r);
     if (clear) {
-      const g = rideLoad(design, out, o);
-      if (g <= COMFORT_G) return out;
-      if (!gentlest || g < gentlest.g) gentlest = { out, g };
-      return null;
+      const c = { out, len: lengthOf(out), g: rideLoad(design, out, o) };
+      clearRoutes.push(c);
+      if (c.len <= maxLen && c.g <= COMFORT_G) return true;
     }
-    const gap = worstGap({ ...design, nodes: [...design.nodes, ...out], closed: true });
-    if (!best || gap > best.gap) best = { out, gap };
-    return null;
+    if (tried >= 6 && clearRoutes.some((x) => x.len <= maxLen)) return true;
+    if (clear) return false;
+    // Only measured when nothing is clear (it bakes the whole circuit).
+    if (!clearRoutes.length) {
+      const gap = worstGap({ ...design, nodes: [...design.nodes, ...out], closed: true });
+      if (!best || gap > best.gap) best = { out, gap };
+    }
+    return false;
   };
-  for (const brakeLength of brakes)
-    for (const r of radii) {
-      const out = tryPath({ ...opt, brakeLength }, r);
-      if (out) return out;
+  search: {
+    for (const brakeLength of brakes) for (const r of radii) if (tryPath({ ...opt, brakeLength }, r)) break search;
+    // A long straight brake run can head into earlier track on a busy layout: then leave with a
+    // short straight instead, and turns wide enough for the full speed (the train is trimmed later).
+    if (opt.speed > RETURN_SPEED + 2 && !opt.radius) {
+      const wide = Math.min(40, Math.max(14, (opt.speed * opt.speed) / (9.81 * 1.1)));
+      for (const brakeLength of brakes) for (const r of [wide, wide * 1.4]) if (tryPath({ ...opt, brakeLength, shortLead: true }, r)) break search;
     }
-  // A long straight brake run can head into earlier track on a busy layout: then leave with a short
-  // straight instead, and turns wide enough for the full speed (the train is trimmed later).
-  if (opt.speed > RETURN_SPEED + 2 && !opt.radius) {
-    const wide = Math.min(40, Math.max(14, (opt.speed * opt.speed) / (9.81 * 1.1)));
-    for (const brakeLength of brakes)
-      for (const r of [wide, wide * 1.4]) {
-        const out = tryPath({ ...opt, brakeLength, shortLead: true }, r);
-        if (out) return out;
-      }
   }
-  const g = gentlest as { out: TrackNode[]; g: number } | null;
-  if (g) return g.out;
+  // Choose: the shortest comfortable route within the boundary; else the gentlest within it; only
+  // if nothing inside the boundary works, the shortest clear route of all.
+  const inside = clearRoutes.filter((c) => c.len <= maxLen);
+  const comfy = inside.filter((c) => c.g <= COMFORT_G).sort((a, b) => a.len - b.len);
+  if (comfy.length) return comfy[0]!.out;
+  if (inside.length) return inside.sort((a, b) => a.g - b.g || a.len - b.len)[0]!.out;
+  if (clearRoutes.length) return clearRoutes.sort((a, b) => a.len - b.len)[0]!.out;
   return (best as { out: TrackNode[]; gap: number } | null)!.out;
 }
 

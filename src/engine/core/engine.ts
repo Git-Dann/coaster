@@ -703,6 +703,23 @@ export class Engine {
     this.rig.focusOn(new THREE.Vector3(p[0], p[1], p[2]), THREE.MathUtils.clamp(this.rig.distance, 45, 85));
   }
 
+  /**
+   * A normal close-up view to come back to after riding or watching: looking at the train from the
+   * side and a little above, at a comfortable distance (not the whole-coaster overview).
+   */
+  viewNearTrain(): void {
+    const t = this.track;
+    if (!t) return this.frameCoaster();
+    const smp = t.sample(this.sim.s, this.smpTmp);
+    const target = new THREE.Vector3(smp.pos[0], smp.pos[1], smp.pos[2]);
+    this.rig.focusOn(target, 42);
+    // Side-on to the direction of travel, so the train and the track ahead are both in view.
+    this.rig.yaw = Math.atan2(smp.tan[0], smp.tan[2]) + Math.PI / 2;
+    this.rig.pitch = 0.38;
+  }
+
+  private readonly smpTmp = { pos: [0, 0, 0], tan: [0, 0, 0], up: [0, 0, 0], right: [0, 0, 0], curv: [0, 0, 0], bank: 0, kind: 'track', param: 0 } as unknown as Parameters<BakedTrack['sample']>[1];
+
   frameCoaster(): void {
     const t = this.track;
     if (!t) return;

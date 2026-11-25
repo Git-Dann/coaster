@@ -72,6 +72,11 @@ describe('smooth track', () => {
         expect(bankJerk(t, from, t.length), `${biome} trial ${trial}: banking changes abruptly`).toBeLessThan(0.06);
         // Still clear of the ground everywhere (on the station pad, at least as high as the platform sits).
         for (let i = Math.floor(from / t.ds); i < t.count; i += 4) expect(t.pos[i * 3 + 1]! - ground(t.pos[i * 3]!, t.pos[i * 3 + 2]!)).toBeGreaterThan(0.4);
+        // It doesn't wander off across the map to get home.
+        const first = d.nodes[0]!;
+        const last = d.nodes[d.nodes.length - 1]!;
+        const straight = Math.hypot(last.p[0] - first.p[0], last.p[2] - first.p[2]);
+        expect(t.length - from, `${biome} trial ${trial}: the return is ${(t.length - from).toFixed(0)} m long`).toBeLessThanOrEqual(Math.max(220, straight * 2.4 + 2 * Math.PI * 34 + 60) + 40);
         points += tp;
         metres += t.length - from;
       }

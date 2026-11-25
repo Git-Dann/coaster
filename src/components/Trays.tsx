@@ -537,7 +537,8 @@ export function RideTray() {
       </Row>
       <p className="cc-tray-heading">View and more</p>
       <Row label="View and more">
-        <Card label="Builder view" icon="frame" on={camera === 'orbit'} onClick={() => (ui('select'), useGame.setState({ camera: 'orbit' }), services.engine?.frameCoaster())} />
+        <Card label="Builder view" icon="build" on={camera === 'orbit'} onClick={() => (ui('select'), useGame.setState({ camera: 'orbit' }), services.engine?.viewNearTrain())} />
+        <Card label="Whole coaster" icon="frame" onClick={() => (ui('select'), useGame.setState({ camera: 'orbit' }), services.engine?.frameCoaster())} />
         <Card label="Train to station" icon="reset" onClick={() => (ui('tap'), services.engine?.resetTrain())} />
         <Card label="Relax" icon="leaf" onClick={() => (ui('open'), useGame.setState({ overlay: 'relax', panel: 'none', camera: 'relax' }))} />
         <Card label="Photo" icon="camera" onClick={() => (ui('open'), useGame.setState({ overlay: 'photo', panel: 'none' }))} />

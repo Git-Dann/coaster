@@ -28,7 +28,19 @@ export function TopBar() {
         <span className="cc-coaster-name">{name}</span>
       </div>
       <div className="cc-top-right">
-        {camera !== 'orbit' && <IconButton icon="frame" label="Builder view" variant="solid" onClick={() => useGame.setState({ camera: 'orbit' })} />}
+        {camera !== 'orbit' && (
+          <button
+            type="button"
+            className="cc-pill-btn small cc-stop-ride"
+            onClick={() => {
+              ui('close');
+              useGame.setState({ camera: 'orbit' });
+              services.engine?.viewNearTrain();
+            }}
+          >
+            <Icon name="close" size={18} /> <span>Stop riding</span>
+          </button>
+        )}
         <IconButton
           icon={muted ? 'mute' : 'speaker'}
           label={muted ? 'Sound off: tap to turn it on' : 'Sound on: tap to mute'}
@@ -73,6 +85,8 @@ export function BottomNav() {
               // bring you back to the builder view.
               ...((next === 'build' || next === 'decorate') && cam !== 'orbit' ? { camera: 'orbit' as const } : {}),
             });
+            // Leaving a ride for Decorate: a normal close view, not the far overview.
+            if (next === 'decorate' && cam !== 'orbit') services.engine?.viewNearTrain();
           }}
         >
           <Icon name={n.icon} size={24} />
