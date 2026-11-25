@@ -1302,9 +1302,12 @@
   padding: 0 18px;
   font-size: var(--fs-sm, 0.85rem);
   color: var(--ink-soft);
-  white-space: nowrap;
+  /* Hints can be a sentence long: wrap to two lines rather than cut off. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.3;
 }
 .cc-add-btn {
   white-space: nowrap;

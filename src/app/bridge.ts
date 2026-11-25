@@ -267,7 +267,8 @@ function frameNodes(e: Engine, d: TrackDesign, from: number, to: number, c: Buil
     radius = Math.max(radius, Math.hypot(p[0] - centre[0], p[1] - centre[1], p[2] - centre[2]));
   }
   e.previewFocus = d.nodes[b]!.p;
-  e.lookAt(centre, Math.max(choiceDistance(c), radius * 2.4));
+  // A little extra for the bulge of curves between nodes and the supports below.
+  e.frameSphere(centre, radius + 3, choiceDistance(c) * 0.7);
 }
 
 /** Camera distance for the edit view: specials are taller, so stand back a little. */

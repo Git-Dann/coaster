@@ -617,6 +617,24 @@ export class Engine {
     else cam.setViewOffset(w, h, nx, ny, w, h);
   }
 
+  /**
+   * Glide the build camera so a sphere (a piece of track) fits in the clear part of the screen,
+   * the area not covered by the panels: centred there, and far enough back that it all shows.
+   */
+  frameSphere(centre: V3, radius: number, minDistance = 30): void {
+    if (this.rig.mode !== 'orbit') return;
+    const w = Math.max(1, this.canvas.clientWidth);
+    const h = Math.max(1, this.canvas.clientHeight);
+    const margin = 28;
+    const clearW = Math.max(80, w - this.insets.left - this.insets.right - margin * 2);
+    const clearH = Math.max(80, h - this.insets.top - this.insets.bottom - margin * 2);
+    const tanHalf = Math.tan(THREE.MathUtils.degToRad(this.rig.camera.fov) / 2);
+    // Half-angles of the clear area, vertically and across.
+    const half = Math.atan(Math.min(tanHalf * (clearH / h), tanHalf * (clearW / h)));
+    const distance = THREE.MathUtils.clamp(radius / Math.sin(Math.max(0.05, half)), minDistance, 320);
+    this.rig.focusOn(new THREE.Vector3(centre[0], centre[1], centre[2]), distance);
+  }
+
   /** Smoothly move the build camera to look at a point, keeping the current zoom. */
   lookAt(p: V3, distance?: number): void {
     if (this.rig.mode !== 'orbit') return;
