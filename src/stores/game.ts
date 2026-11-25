@@ -179,7 +179,7 @@ export const useGame = create<GameState & GameActions>()((set, get) => ({
   selectedNode: null,
   sceneryTool: null,
   brush: null,
-  brushRadius: 8,
+  brushRadius: 10,
   brushStrength: 1,
   worldRevision: 0,
 

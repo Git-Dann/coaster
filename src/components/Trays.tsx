@@ -225,13 +225,20 @@ const THINGS: Array<{ value: SceneryType; label: string; icon: string }> = [
   { value: 'sign', label: 'Sign', icon: 'info' },
   { value: 'hut', label: 'Hut', icon: 'folder' },
 ];
-const LAND: Array<{ value: TerrainBrush; label: string; icon: string }> = [
-  { value: 'raise', label: 'Raise', icon: 'up' },
-  { value: 'lower', label: 'Lower', icon: 'down' },
-  { value: 'smooth', label: 'Smooth', icon: 'ride' },
-  { value: 'flatten', label: 'Flatten', icon: 'minus' },
-  { value: 'paint-path', label: 'Path', icon: 'brush' },
-  { value: 'clear-vegetation', label: 'Clear', icon: 'eraser' },
+const LAND: Array<{ value: TerrainBrush; label: string; icon: string; tip: string }> = [
+  { value: 'raise', label: 'Raise', icon: 'up', tip: 'Drag to build the ground up into a hill' },
+  { value: 'lower', label: 'Lower', icon: 'down', tip: 'Drag to dig the ground down into a hollow' },
+  { value: 'smooth', label: 'Smooth', icon: 'ride', tip: 'Drag to soften bumps and slopes' },
+  { value: 'flatten', label: 'Flatten', icon: 'minus', tip: 'Drag to level the ground to where you started' },
+  { value: 'paint-path', label: 'Path', icon: 'brush', tip: 'Drag to paint a footpath' },
+  { value: 'clear-vegetation', label: 'Clear trees', icon: 'eraser', tip: 'Drag to clear trees and bushes' },
+];
+/** The size option nearest a brush radius (older saves may hold other radii). */
+const nearestSize = (r: number) => BRUSH_SIZES.reduce((a, b) => (Math.abs(b.r - r) < Math.abs(a.r - r) ? b : a)).r;
+const BRUSH_SIZES = [
+  { r: 5, label: 'Small' },
+  { r: 10, label: 'Medium' },
+  { r: 18, label: 'Large' },
 ];
 
 export function DecorateTray() {
@@ -272,21 +279,34 @@ export function DecorateTray() {
           />
         </Row>
       ) : (
-        <Row label="Landscape tools">
-          {LAND.map((t) => (
-            <Card key={t.value} label={t.label} icon={t.icon} on={brush === t.value} onClick={() => (ui('select'), useGame.setState({ brush: brush === t.value ? null : t.value }))} />
-          ))}
-          {[
-            { r: 5, label: 'Small' },
-            { r: 10, label: 'Medium' },
-            { r: 18, label: 'Large' },
-          ].map((s) => (
-            <Card key={s.r} small label={s.label} icon="sparkle" on={radius === s.r} onClick={() => (ui('select'), useGame.setState({ brushRadius: s.r }))} />
-          ))}
-        </Row>
+        <>
+          <Row label="Landscape tools">
+            {LAND.map((t) => (
+              <Card key={t.value} label={t.label} icon={t.icon} on={brush === t.value} onClick={() => (ui('select'), useGame.setState({ brush: brush === t.value ? null : t.value }))} />
+            ))}
+          </Row>
+          <div className="cc-tray-actions">
+            <span className="cc-tray-heading inline">Brush size</span>
+            <div className="cc-pill-pair" role="group" aria-label="Brush size">
+              {BRUSH_SIZES.map((b) => (
+                <button key={b.r} type="button" className={nearestSize(radius) === b.r ? 'on' : ''} aria-pressed={nearestSize(radius) === b.r} onClick={() => (ui('select'), useGame.setState({ brushRadius: b.r }))}>
+                  {b.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
       )}
       <p className="cc-tray-tip line">
-        {tab === 'things' ? (eraser ? 'Tap something to remove it' : tool ? 'Tap the ground to place it' : 'Pick something, then tap the ground') : brush ? 'Drag on the ground · two fingers move the view' : 'Pick a tool, then drag on the ground'}
+        {tab === 'things'
+          ? eraser
+            ? 'Tap something to remove it'
+            : tool
+              ? 'Tap the ground to place it'
+              : 'Pick something, then tap the ground'
+          : brush
+            ? `${LAND.find((t) => t.value === brush)?.tip ?? 'Drag on the ground'} · two fingers move the view`
+            : 'Pick a tool, then drag on the ground'}
       </p>
     </Tray>
   );

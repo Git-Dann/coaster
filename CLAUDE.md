@@ -10,6 +10,7 @@ Browser 3D roller coaster sandbox. Three.js + strict TypeScript + Vite + React (
 - `npm run build && npm run test:e2e`: Playwright smoke/regression against the production preview
 - `npm run playtest`: scripted playtest of every control on three layouts (needs `npm run preview -- --port 4810` running); writes screenshots and `issues.json` to `test-results/playtest`
 - `node scripts/icons.cjs`: regenerate PWA icons from `public/icons/icon.svg`
+- `node scripts/social.cjs`: regenerate the link-preview image `public/og-image.jpg` (needs `npm run preview -- --port 4810` running)
 
 ## Non-negotiables
 

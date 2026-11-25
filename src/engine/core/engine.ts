@@ -550,10 +550,18 @@ export class Engine {
     this.afterTerrainChange();
   }
 
+  /**
+   * Shape the ground. While a brush is being dragged only the ground updates (fast); the track,
+   * supports and scenery follow once, a moment after the last stroke, instead of being rebuilt for
+   * every step of the drag (which made brushing crawl on phones).
+   */
   addTerrainStroke(s: TerrainStroke): void {
     this.terrain.addStroke(s);
-    this.afterTerrainChange();
+    window.clearTimeout(this.terrainSettle);
+    this.terrainSettle = window.setTimeout(() => this.afterTerrainChange(), 260);
   }
+
+  private terrainSettle = 0;
 
   private afterTerrainChange(): void {
     // The return track re-routes over the new ground; supports re-anchor; scenery follows the surface.
@@ -1154,6 +1162,7 @@ export class Engine {
   }
 
   dispose(): void {
+    window.clearTimeout(this.terrainSettle);
     this.stop();
     this.gestures.dispose();
     this.canvas.removeEventListener('webglcontextlost', this.onLost);
