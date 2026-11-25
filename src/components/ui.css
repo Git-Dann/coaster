@@ -803,16 +803,6 @@
 }
 
 /* Centred overlays without transforms, so entrance animations never slide sideways */
-.cc-welcome-wrap {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  justify-content: center;
-  align-items: flex-end;
-  padding: 0 16px calc(var(--safe-bottom) + 96px);
-  pointer-events: none;
-  z-index: 10;
-}
 .cc-welcome {
   position: relative;
   left: auto;
