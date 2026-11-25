@@ -33,7 +33,8 @@ async function audit(page, ctx) {
       if ((b.width < 36 || b.height < 34) && (el.closest('.cc-pill-pair') || el.closest('.cc-tabs'))) out.ui.push(`small target: "${name}" ${Math.round(b.width)}x${Math.round(b.height)}`);
       // Is the centre actually hittable (not covered by something else)?
       const cx = Math.min(vw - 1, Math.max(0, b.left + b.width / 2)), cy = Math.min(vh - 1, Math.max(0, b.top + b.height / 2));
-      if (!inScroller(el) || (b.left >= 0 && b.right <= vw)) {
+      const sc = inScroller(el)?.getBoundingClientRect();
+      if (!sc || (b.left >= sc.left && b.right <= sc.right)) {
         const hit = document.elementFromPoint(cx, cy);
         if (hit && hit !== el && !el.contains(hit) && !hit.contains(el)) out.ui.push(`covered: "${name}" by ${hit.className || hit.tagName}`);
       }

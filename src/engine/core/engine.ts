@@ -522,7 +522,7 @@ export class Engine {
     const tanV = Math.tan(THREE.MathUtils.degToRad(this.rig.camera.fov) / 2);
     const tanFit = Math.min(tanV * this.clearFraction(), tanV * aspect);
     if (aspect < 1) this.rig.pitch = 0.62; // portrait: look down more so the length fits the tall screen
-    this.rig.focusOn(c, Math.max(30, (radius / Math.sin(Math.atan(tanFit))) * 0.92));
+    this.rig.focusOn(c, Math.max(30, radius / Math.sin(Math.atan(tanFit))));
   }
 
   // ---------------------------------------------------------------- picking
@@ -765,7 +765,7 @@ export class Engine {
     // Audio.
     this.updateAudio(dt, supportsMoving);
 
-    this.painterly.render(this.renderer, this.scene, cam, this.elapsed, this.atmosphere.horizon, Math.max(this.terrain.drawDistance, 650));
+    this.painterly.render(this.renderer, this.scene, cam, this.elapsed, this.atmosphere.horizon, Math.max(this.terrain.drawDistance, 650, viewDist));
 
     // Performance bookkeeping.
     this.cpuMs = performance.now() - t0;
