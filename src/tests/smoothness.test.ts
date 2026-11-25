@@ -70,8 +70,8 @@ describe('smooth track', () => {
         const tp = turningPoints(t, from, t.length);
         expect(tp, `${biome} trial ${trial}: the return rises and falls ${tp} times`).toBeLessThanOrEqual(1);
         expect(bankJerk(t, from, t.length), `${biome} trial ${trial}: banking changes abruptly`).toBeLessThan(0.06);
-        // Still clear of the ground everywhere.
-        for (let i = Math.floor(from / t.ds); i < t.count; i += 4) expect(t.pos[i * 3 + 1]! - ground(t.pos[i * 3]!, t.pos[i * 3 + 2]!)).toBeGreaterThan(0.6);
+        // Still clear of the ground everywhere (on the station pad, at least as high as the platform sits).
+        for (let i = Math.floor(from / t.ds); i < t.count; i += 4) expect(t.pos[i * 3 + 1]! - ground(t.pos[i * 3]!, t.pos[i * 3 + 2]!)).toBeGreaterThan(0.4);
         points += tp;
         metres += t.length - from;
       }

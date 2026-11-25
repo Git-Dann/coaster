@@ -264,7 +264,7 @@ export function energyWalk(t: BakedTrack, roughness = 1, fromS = 0, v0 = 2): { s
 /** How many up-and-down bumps each kind of piece naturally has (plain track: one gentle ramp). */
 const NATURAL_BUMPS: Partial<Record<PieceId, number>> = { hill: 2, loop: 2, roll: 2, corkscrew: 2, lift: 1, drop: 1, helix: 1 };
 /** Tightest natural curvature (1/m) of each element; plain track and joins stay far gentler. */
-const MAX_CURVATURE: Partial<Record<PieceId, number>> = { loop: 0.3, roll: 0.3, corkscrew: 0.34, hill: 0.18, lift: 0.14, drop: 0.21, helix: 0.13 };
+const MAX_CURVATURE: Partial<Record<PieceId, number>> = { loop: 0.3, roll: 0.3, corkscrew: 0.34, hill: 0.22, lift: 0.14, drop: 0.21, helix: 0.13 };
 /** Fastest natural change in curvature (1/m per m) of each element; plain track eases in and out of its turns. */
 const MAX_CURVATURE_RATE: Partial<Record<PieceId, number>> = { loop: 0.35, roll: 0.3, corkscrew: 0.48, drop: 0.28, hill: 0.2 };
 
@@ -419,6 +419,78 @@ export function planNext(design: TrackDesign, choice: BuildChoice, ground: (x: n
   return result;
 }
 
+/**
+ * Where one plain piece meets the next, give the shared node the slope that runs smoothly through
+ * both (like a spline through the heights either side), instead of always levelling off. A chain of
+ * climbs or descents is then one steady slope, not a staircase of crests and dips. The station
+ * stays level.
+ */
+function smoothJoinPitch(d: TrackDesign, j: number): void {
+  const prev = d.nodes[j - 1];
+  const join = d.nodes[j];
+  const next = d.nodes[j + 1];
+  if (!prev || !join || !next) return;
+  // Never the station (it stays level). The end of a special piece takes the slope only when the
+  // stretch into it is a plain lead-out (unbanked, nearly straight): an element's own exit keeps
+  // its shape.
+  if (join.group === 'station' || prev.group === 'station') return;
+  if (join.kind !== 'track' && join.kind !== 'lift') return;
+  const plain = decodeChoice(join.group ?? '')?.kind === 'track';
+  if (!plain) {
+    const wrapped = (b: number) => Math.abs(b - Math.round(b / (2 * Math.PI)) * 2 * Math.PI);
+    const turn = Math.abs(Math.atan2(-prev.dir[2], prev.dir[0]) - Math.atan2(-join.dir[2], join.dir[0]));
+    const level = Math.abs(prev.dir[1]) < 0.35;
+    if (wrapped(join.bank) > 0.05 || wrapped(prev.bank) > 0.05 || Math.min(turn, 2 * Math.PI - turn) > 0.2 || !level) return;
+  }
+  const runIn = Math.hypot(join.p[0] - prev.p[0], join.p[2] - prev.p[2]);
+  const runOut = Math.hypot(next.p[0] - join.p[0], next.p[2] - join.p[2]);
+  // Needs a proper stretch either side to judge the slope from.
+  if (runIn < 3 || runOut < 3) return;
+  // Monotone rule (no overshoot): keep a slope through the join only when the track carries on the
+  // same way on both sides; where a climb meets level track (or a crest or dip) the join is level, so
+  // a level piece never rises and falls back.
+  const secIn = (join.p[1] - prev.p[1]) / runIn;
+  const secOut = (next.p[1] - join.p[1]) / runOut;
+  let slope = 0;
+  if (secIn * secOut > 1e-6) {
+    slope = (secIn * runOut + secOut * runIn) / (runIn + runOut);
+    const lim = 3 * Math.min(Math.abs(secIn), Math.abs(secOut));
+    if (Math.abs(slope) > lim) slope = Math.sign(slope) * lim;
+  }
+  const pitch = Math.atan(slope);
+  const h = Math.hypot(join.dir[0], join.dir[2]) || 1;
+  const fx = join.dir[0] / h;
+  const fz = join.dir[2] / h;
+  d.nodes[j] = { ...join, dir: [fx * Math.cos(pitch), Math.sin(pitch), fz * Math.cos(pitch)] };
+}
+
+/**
+ * Grid target for a lead-out (back onto the grid after older track or a special piece): far enough
+ * ahead that the height change, plus any slope the track leaves the element with, stays gentle
+ * (about a 12% grade). A short, steep lead-out is a dip and a crest in quick succession.
+ */
+function leadOutTarget(g: GridFrame, t: TrackNode, yFor: (x: number, z: number) => number, radius = 10): { target: ReturnType<typeof gridTarget>; y1: number } {
+  const h = Math.atan2(-t.dir[2], t.dir[0]);
+  let best = gridTarget(g, { x: t.p[0], z: t.p[2], h }, 2, 0, 0);
+  let y1 = yFor(best.x, best.z);
+  for (let tiles = 2; tiles <= 8; tiles++) {
+    const target = gridTarget(g, { x: t.p[0], z: t.p[2], h }, tiles, 0, 0);
+    const y = yFor(target.x, target.z);
+    const run = Math.hypot(target.x - t.p[0], target.z - t.p[2]);
+    best = target;
+    y1 = y;
+    // The exit slope carried over this run, and the height still to make up.
+    const carried = Math.abs(t.dir[1]) * run * 0.5;
+    // A sideways step back onto the grid line is an S of two arcs of this radius: it needs room.
+    const fx = Math.cos(h);
+    const fz = -Math.sin(h);
+    const side = Math.abs((target.x - t.p[0]) * -fz + (target.z - t.p[2]) * fx);
+    const sNeeded = side > 0.05 ? 2 * Math.sqrt(side * Math.max(0, 2 * radius - side)) + 4 : 0;
+    if (Math.abs(y - t.p[1]) + carried <= 0.12 * run && run >= sNeeded) break;
+  }
+  return { target: best, y1 };
+}
+
 function planNextUncached(design: TrackDesign, choice: BuildChoice, ground: (x: number, z: number) => number, committed?: BakedTrack | null): NextPiece {
   const base = opened(design);
   const info = baseInfo(base);
@@ -447,21 +519,34 @@ function planNextUncached(design: TrackDesign, choice: BuildChoice, ground: (x: 
   const tail = () => d.nodes[d.nodes.length - 1]!;
   if (!onGrid(g, tail().p, tail().dir)) {
     const t = tail();
-    const target = gridTarget(g, { x: t.p[0], z: t.p[2], h: headingOf(t.dir) }, 2, 0, 0);
-    push(pathTo(t, target, { y1: Math.max(snapLevel(g, t.p[1]), ceilLevel(floorAt(target.x, target.z))), radius: 10, speed }, prefix(), group));
+    const lo = leadOutTarget(g, t, (x, z) => Math.max(snapLevel(g, t.p[1]), ceilLevel(floorAt(x, z))));
+    push(pathTo(t, lo.target, { y1: lo.y1, radius: 10, speed }, prefix(), group));
   }
   if (choice.kind === 'track') {
     // 2. Plain track: two tiles straight, or a quarter turn of radius two tiles; 4 m per climb.
     const t = tail();
     const target = gridTarget(g, { x: t.p[0], z: t.p[2], h: headingOf(t.dir) }, 2, choice.turn * 2, choice.turn);
-    let y1 = snapLevel(g, t.p[1]) + choice.slope * 2 * LEVEL;
+    // Slopes are gentler for a fast train: half the height change, so the crest at the top of a
+    // descent (or the dip at the foot of a climb) is half as sharp. At speed a full step would throw
+    // riders out of their seats, or press them hard into them.
+    const fastHere = !info.stalled && info.vEnd > 11;
+    let y1 = snapLevel(g, t.p[1]) + choice.slope * (fastHere ? 1 : 2) * LEVEL;
     const floor = ceilLevel(Math.max(floorAt(target.x, target.z), floorAt((t.p[0] + target.x) / 2, (t.p[2] + target.z) / 2)));
     if (y1 < floor) {
       atGround = choice.slope < 0;
       y1 = floor;
     }
     const climbStart = d.nodes.length - 1;
-    push(pathTo(t, target, { y1, radius: choice.turn ? 2 * TILE : 10, speed }, prefix(), group));
+    // The previous piece may end partway up (or down) a slope. Carry that slope on only when this
+    // piece keeps going the same way; otherwise start level, so a level piece never overshoots.
+    const dy = y1 - t.p[1];
+    if (Math.abs(t.dir[1]) > 1e-3 && (Math.abs(dy) < 0.5 || Math.sign(dy) !== Math.sign(t.dir[1]))) {
+      const h = Math.hypot(t.dir[0], t.dir[2]) || 1;
+      d.nodes[d.nodes.length - 1] = { ...t, dir: [t.dir[0] / h, 0, t.dir[2] / h] };
+    }
+    // Banked for the speed the train really arrives with (the speed walk), not a rough estimate.
+    const bankSpeed = info.stalled ? speed : Math.max(speed * 0.5, info.vEnd);
+    push(pathTo(tail(), target, { y1, radius: choice.turn ? 2 * TILE : 10, speed: bankSpeed }, prefix(), group));
     if (choice.slope > 0 && !atGround) {
       // Climbs carry a chain (like a park builder's chain-lift slopes): the train never stalls on
       // the way up, and you hear the ratchet. The chain only ever pulls a slow train up to speed.
@@ -482,6 +567,12 @@ function planNextUncached(design: TrackDesign, choice: BuildChoice, ground: (x: 
     const piece = pieceById(choice.id);
     const preset = presetById(piece.preset);
     const params: Record<string, number> = { ...preset.defaults, ...piece.params };
+    // Inversions are stretched for faster trains, the way real ones are: the forces in a corkscrew or
+    // roll grow with the square of speed over length, so a fixed size is gentle when slow and brutal
+    // when fast. Sized to the speed the train actually arrives with.
+    const arrive = info.stalled ? 3 : info.vEnd;
+    if (choice.id === 'corkscrew') params.length = Math.min(52, Math.max(params.length ?? 22, arrive * 2.5));
+    if (choice.id === 'roll') params.length = Math.min(50, Math.max(params.length ?? 28, arrive * 1.9));
     if (choice.id === 'drop') {
       // Drop only as far as the ground ahead allows.
       const t = tail();
@@ -496,16 +587,43 @@ function planNextUncached(design: TrackDesign, choice: BuildChoice, ground: (x: 
     }
     const before = cloneDesign(d);
     const upright = Math.round(tail().bank / (2 * Math.PI)) * 2 * Math.PI;
-    const ctx = { uprightBank: upright, speedAtEnd: speed, autoBank: true };
+    // Elements are shaped (banking, drop curves) for the speed the train really arrives with.
+    const arriving = info.stalled ? 3 : Math.max(3, info.vEnd);
+    // Corkscrews exit in line on the grid (no sideways S-bend after them).
+    const ctx = { uprightBank: upright, speedAtEnd: info.stalled ? speed : arriving, entrySpeed: arriving, autoBank: true, corkscrewShift: 0 };
     const cursorOf = (n: TrackNode) => ({ p: [...n.p] as V3, dir: [...n.dir] as V3, bank: n.bank });
-    const build = (rise: number): TrackDesign => {
-      let x = cloneDesign(before);
-      if (rise > 0) x = appendElement(x, presetById('track').make(cursorOf(x.nodes[x.nodes.length - 1]!), { length: Math.max(18, rise / MAX_GRADE), turn: 0, rise, bank: 0 }, ctx), group);
-      x = appendElement(x, preset.make(cursorOf(x.nodes[x.nodes.length - 1]!), params, ctx), group);
+    // How far the element (not its lead-in ramp or lead-out) dips below a safe height over the ground.
+    const deficitOf = (x: TrackDesign, from: number, to: number) => {
+      const part = new BakedTrack({ ...x, closed: false, nodes: x.nodes.slice(Math.max(0, from - 1), to + 1) }, 1);
+      let worst = 0;
+      for (let i = 0; i < part.count; i++) worst = Math.max(worst, ground(part.pos[i * 3]!, part.pos[i * 3 + 2]!) + 1.2 - part.pos[i * 3 + 1]!);
+      return worst;
+    };
+    const build = (rise0: number): TrackDesign => {
+      let rise = rise0;
+      let x = before;
+      // Elements are never bent: if one would come too close to the ground, the whole element is
+      // raised on a longer, gentle ramp in front (about 11° on average) rather than lifting single
+      // points, which would put a kink into it.
+      for (let attempt = 0; attempt < 4; attempt++) {
+        x = cloneDesign(before);
+        if (rise > 0) x = appendElement(x, presetById('track').make(cursorOf(x.nodes[x.nodes.length - 1]!), { length: Math.max(24, rise / 0.2), turn: 0, rise, bank: 0 }, ctx), group);
+        const elemStart = x.nodes.length;
+        x = appendElement(x, preset.make(cursorOf(x.nodes[x.nodes.length - 1]!), params, ctx), group);
+        const lack = deficitOf(x, elemStart, x.nodes.length - 1);
+        if (lack <= 0.05) break;
+        // A drop that would reach the ground just drops less; anything else is raised whole.
+        if (choice.id === 'drop') params.depth = Math.max(3, (params.depth ?? 10) - lack - 0.3);
+        else rise += Math.ceil(lack / LEVEL) * LEVEL;
+      }
+      const joinFrom = x.nodes.length;
       const t = x.nodes[x.nodes.length - 1]!;
-      const target = gridTarget(g, { x: t.p[0], z: t.p[2], h: headingOf(t.dir) }, 2, 0, 0);
-      for (const n of pathTo(t, target, { y1: Math.max(snapLevel(g, t.p[1]), ceilLevel(floorAt(target.x, target.z))), radius: 10, speed }, prefix(), group)) x.nodes.push(n);
-      liftAboveGround(x, start, ground);
+      // Sideways bends in the lead-out are sized for the speed (about half a g at most).
+      const leadR = Math.min(80, Math.max(10, (arriving * arriving) / (9.81 * 0.5)));
+      const lo = leadOutTarget(g, t, (px, pz) => Math.max(snapLevel(g, t.p[1]), ceilLevel(floorAt(px, pz))), leadR);
+      for (const n of pathTo(t, lo.target, { y1: lo.y1, radius: leadR, speed }, prefix(), group)) x.nodes.push(n);
+      // Only the plain lead-out follows the ground.
+      liftAboveGround(x, joinFrom, ground);
       return x;
     };
     let chosen: TrackDesign | null = null;
@@ -520,7 +638,51 @@ function planNextUncached(design: TrackDesign, choice: BuildChoice, ground: (x: 
     }
     d.nodes = chosen!.nodes;
   }
-  liftAboveGround(d, start, ground);
+  // Slopes run smoothly through the join and every point inside a plain piece (its end stays as
+  // planned until the next piece is added).
+  // Points crammed together (a sliver left by a short join back onto the grid) make the curve
+  // between them kink: drop any new point that crowds the one before it. The piece's end stays.
+  for (let i = d.nodes.length - 2; i >= start; i--) {
+    const a = d.nodes[i]!.p;
+    const b = d.nodes[i - 1]!.p;
+    if (Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < 2 && !d.nodes[i]!.kind.match(/station/)) d.nodes.splice(i, 1);
+  }
+  if (d.nodes.length > start + 1) {
+    const e = d.nodes[d.nodes.length - 1]!.p;
+    const b = d.nodes[d.nodes.length - 2]!.p;
+    if (Math.hypot(e[0] - b[0], e[1] - b[1], e[2] - b[2]) < 2 && d.nodes.length - 2 >= start) d.nodes.splice(d.nodes.length - 2, 1);
+  }
+  // Roll in before a turn and out after it, like a real coaster: the joins either side carry about a
+  // third of the turn's banking, so the banking leads the curve instead of lagging behind it (which
+  // throws riders sideways at the start of a fast turn).
+  if (choice.kind === 'track' && choice.turn !== 0 && d.nodes.length - start >= 2) {
+    const join = d.nodes[start - 1]!;
+    const wind = Math.round(join.bank / (2 * Math.PI)) * 2 * Math.PI;
+    const firstArc = d.nodes[start]!;
+    const end = d.nodes[d.nodes.length - 1]!;
+    const lastArc = d.nodes[d.nodes.length - 2]!;
+    const flat = (b: number) => Math.abs(b - wind) < 0.02;
+    if (flat(join.bank) && join.group !== 'station' && (join.kind === 'track' || join.kind === 'lift')) d.nodes[start - 1] = { ...join, bank: wind + 0.33 * (firstArc.bank - wind) };
+    if (flat(end.bank)) d.nodes[d.nodes.length - 1] = { ...end, bank: wind + 0.33 * (lastArc.bank - wind) };
+  }
+  if (choice.kind === 'track') {
+    for (let j = start - 1; j < d.nodes.length - 1; j++) smoothJoinPitch(d, j);
+    // A slope ends at half its angle rather than levelling off sharply in its last few metres; the
+    // next piece (or the automatic return) carries on from there and levels out gently.
+    const e = d.nodes.length - 1;
+    const end = d.nodes[e]!;
+    const before = d.nodes[e - 1];
+    if (choice.slope !== 0 && before && end.kind !== 'station') {
+      const run = Math.hypot(end.p[0] - before.p[0], end.p[2] - before.p[2]);
+      if (run > 1e-3) {
+        const pitch = Math.atan((end.p[1] - before.p[1]) / run / 2);
+        const h = Math.hypot(end.dir[0], end.dir[2]) || 1;
+        d.nodes[e] = { ...end, dir: [(end.dir[0] / h) * Math.cos(pitch), Math.sin(pitch), (end.dir[2] / h) * Math.cos(pitch)] };
+      }
+    }
+  }
+  // Plain track follows the ground; special elements were raised whole (never bent) above.
+  if (choice.kind === 'track') liftAboveGround(d, start, ground);
   // Never through other track: simple track (including joins) is lifted smoothly over crossings;
   // loops, rolls and other elements are never bent. (The full check only runs when the quick one
   // finds something close.)
@@ -528,6 +690,13 @@ function planNextUncached(design: TrackDesign, choice: BuildChoice, ground: (x: 
   let part = d.nodes.length > start ? bakePart() : null;
   if (part && fastConflicts(info, part)) {
     separateCrossings({ ...d, nodes: [approach, ...d.nodes] }, start + 1, ground);
+    // Lifted points keep the slopes they had before: re-fit them so the ramp doesn't overshoot (and
+    // keep whichever version rides more smoothly).
+    if (choice.kind === 'track') {
+      const kept = d.nodes.slice();
+      for (let j = start - 1; j < d.nodes.length - 1; j++) smoothJoinPitch(d, j);
+      if (roughness(d, start, choice) && !roughness({ ...d, nodes: kept }, start, choice)) d.nodes = kept;
+    }
     part = bakePart();
   }
   const r = { design: d, active: { start } };
@@ -559,6 +728,26 @@ function planNextUncached(design: TrackDesign, choice: BuildChoice, ground: (x: 
     }
   }
   let blocked = needsHeight ? 'Needs height first: add an Up piece or a Lift' : roughness(d, start, choice);
+  // A tight quarter turn taken very fast throws riders sideways however it's banked: real coasters
+  // slow the train first.
+  if (!blocked && choice.kind === 'track' && choice.turn !== 0 && !info.stalled && info.vEnd > 17) blocked = 'Too fast for a tight turn here. Add Brakes first to slow the train';
+  // Ride check at the speed the train will really be doing: no dip that presses riders down harder
+  // than about 5 g and no crest that throws them up harder than about -1.3 g. Otherwise the piece
+  // isn't offered, with a nudge to slow the train first.
+  if (!blocked && !info.stalled && d.nodes.length > start) {
+    const part = new BakedTrack({ ...d, closed: false, nodes: d.nodes.slice(Math.max(0, start - 1)) }, 0.5);
+    const y0 = part.pos[1]!;
+    const v0 = info.vEnd;
+    for (let i = 0; i < part.count && !blocked; i++) {
+      if (part.kind[i] === KIND_LIFT) continue; // the chain carries the train slowly
+      const v2 = Math.max(0, v0 * v0 + 2 * 9.81 * (y0 - part.pos[i * 3 + 1]!) * 0.95);
+      // Curvature along the track's own up direction (positive: a dip that presses riders down).
+      const kUp = part.curv[i * 3]! * part.up[i * 3]! + part.curv[i * 3 + 1]! * part.up[i * 3 + 1]! + part.curv[i * 3 + 2]! * part.up[i * 3 + 2]!;
+      // What riders feel: the curve's push plus the part of gravity along the track's up direction.
+      const felt = (v2 * kUp) / 9.81 + part.up[i * 3 + 1]!;
+      if (felt > 5 || felt < -1.3) blocked = 'Too fast for this here. Add Brakes first to slow the train';
+    }
+  }
   // Final guarantees: never into other track (including the station approach), never into the ground.
   if (!blocked && part && fastConflicts(info, part)) blocked = 'Would run into other track here. Try another direction, or go up or down first';
   if (!blocked && minClearance(d, start, ground) < 0.8) blocked = 'Too close to the ground here. Try going up first';

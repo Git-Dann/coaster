@@ -182,6 +182,7 @@ export function refreshAvailability(): void {
   const needSpeed: string[] = [];
   const needHeight: string[] = [];
   let trackSpeed = false;
+  let tooFast = false;
   // Plain track first (the default choice), then the specials.
   for (const slope of [0, 1, -1] as const)
     for (const turn of [0, -1, 1] as const)
@@ -190,6 +191,7 @@ export function refreshAvailability(): void {
         const ok = !p.blocked && !(slope === -1 && p.atGround);
         track[`${turn},${slope}`] = ok;
         if (!ok && p.blocked && /speed/.test(p.blocked)) trackSpeed = true;
+        if (!ok && p.blocked && /Too fast/.test(p.blocked)) tooFast = true;
       });
   for (const id of SPECIALS) jobs.push(() => {
     const b = planNext(base, { kind: 'special', id }, ground, committed).blocked;
@@ -231,6 +233,8 @@ export function refreshAvailability(): void {
         ? 'The train leaves the station slowly: start with a Lift or a Launch to give it speed'
         : !anyTrack && !specials.length
           ? 'Nothing fits here. Remove the last piece, or change an earlier one'
+          : tooFast && specials.includes('brakes')
+            ? 'Some pieces need a slower train here: add Brakes first'
           : needSpeed.length
             ? `${list(needSpeed)} ${needSpeed.length > 1 ? 'need' : 'needs'} more speed: add a Lift or a Launch first`
             : needHeight.length

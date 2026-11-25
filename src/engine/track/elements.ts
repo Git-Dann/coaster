@@ -224,10 +224,22 @@ export function liftHill(c: Cursor, height: number, angleDeg = 32, speed = 3.4):
 }
 
 /** Steep drop with a crest transition, straight fall and a generous pull-out. */
-export function drop(c: Cursor, depth: number, angleDeg = 50, pullOut = 17): ElementResult {
+export function drop(c: Cursor, depth: number, angleDeg = 50, pullOut = 17, entrySpeed = 3.4): ElementResult {
+  // Shaped for the speed it's entered at: the crest is wide enough that riders float gently rather
+  // than being thrown up (about 0.1 g at the top), and the pull-out wide enough to stay under about
+  // 4 g at the bottom. Off a lift (slow) that's the classic steep drop; off a launch it's a long,
+  // shallower swoop.
+  const g = 9.81;
+  const fast = entrySpeed > 6;
+  const Rc = fast ? Math.max(9, (entrySpeed * entrySpeed) / (0.9 * g)) : 9;
+  const vBottom = Math.sqrt(entrySpeed * entrySpeed + 2 * g * Math.max(0, depth));
+  let Rp = fast ? Math.max(pullOut, (vBottom * vBottom) / (3 * g)) : pullOut;
+  if (fast) {
+    // A shallow drop can't reach a steep angle with wide curves: ease the angle off instead.
+    const maxA = Math.acos(Math.max(-1, Math.min(1, 1 - (0.9 * depth) / (Rc + Rp))));
+    angleDeg = Math.max(12, Math.min(angleDeg, maxA / DEG));
+  }
   const a = angleDeg * DEG;
-  const Rc = 9;
-  let Rp = pullOut;
   let used = Rc * (1 - Math.cos(a)) + Rp * (1 - Math.cos(a));
   if (used > depth * 0.9) {
     Rp = Math.max(6, (depth * 0.9) / (1 - Math.cos(a)) - Rc);
@@ -242,14 +254,28 @@ export function drop(c: Cursor, depth: number, angleDeg = 50, pullOut = 17): Ele
  * Camelback / airtime hill with a sin² profile: zero slope at both ends and a gentle crest.
  * Crest curvature is 2π²H/L², so longer hills give floater airtime, shorter ones ejector airtime.
  */
+/**
+ * A hump from 0 up to 1 and back over u ∈ [0, 1] that starts and ends with no slope and no
+ * curvature (64·(u(1−u))³), so a hill or zero-G roll eases in: the riders never feel a sudden step
+ * into the curve. (A sin² hump starts already curving, which is a jolt at speed.)
+ */
+function bump(u: number): number {
+  const w = u * (1 - u);
+  return 64 * w * w * w;
+}
+function bumpSlope(u: number): number {
+  const w = u * (1 - u);
+  return 192 * w * w * (1 - 2 * u);
+}
+
 export function hill(c: Cursor, height: number, length: number): ElementResult {
   const fr = frame(c);
   const nodes: ElementNode[] = [];
   const count = 6;
   for (let k = 1; k <= count; k++) {
     const u = k / count;
-    const y = height * Math.sin(Math.PI * u) ** 2;
-    const dy = (height * Math.PI * Math.sin(2 * Math.PI * u)) / length;
+    const y = height * bump(u);
+    const dy = (height * bumpSlope(u)) / length;
     nodes.push({ p: toWorld(c, fr, length * u, y, 0), dir: dirWorld(fr, 1, dy, 0), bank: c.bank });
   }
   return { startKind: 'track', nodes };
@@ -320,7 +346,7 @@ export function heartlineRoll(
     const sm = u * u * u * (u * (u * 6 - 15) + 10); // smootherstep
     const phi = direction * rollAngle * sm;
     const hx = length * u;
-    const hy = inv * offset + hump * Math.sin(Math.PI * u) ** 2;
+    const hy = inv * offset + hump * bump(u);
     const hz = lateralShift * (u * u * (3 - 2 * u));
     // Up vector rotated about forward axis by phi: U = Y cos φ + R sin φ
     set(U, 0, inv * Math.cos(phi), inv * Math.sin(phi));
@@ -344,8 +370,8 @@ export function heartlineRoll(
   return { startKind: 'track', nodes };
 }
 
-export function corkscrew(c: Cursor, length = 22, radius = 3.4, direction: 1 | -1 = 1): ElementResult {
-  return heartlineRoll(c, length, radius, 0, direction, 2 * Math.PI, direction * 1.5);
+export function corkscrew(c: Cursor, length = 22, radius = 3.4, direction: 1 | -1 = 1, shift = 1.5): ElementResult {
+  return heartlineRoll(c, length, radius, 0, direction, 2 * Math.PI, direction * shift);
 }
 
 export function zeroGRoll(c: Cursor, length = 26, height = 7, direction: 1 | -1 = 1): ElementResult {

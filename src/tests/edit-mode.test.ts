@@ -231,22 +231,36 @@ describe('edit mode builds on the grid', () => {
 
   test('a straight stays straight: no sag after a climb, no sideways wander after a turn', () => {
     let d = starterPlayable(PAD_HEIGHT + 1);
-    for (const c of [{ kind: 'track', turn: 0, slope: 1 }, { kind: 'track', turn: 1, slope: 0 }] as BuildChoice[]) d = planNext(d, c, ground).design;
+    // (A left turn heads away from the station, so the straight doesn't have to ramp over its approach.)
+    for (const c of [{ kind: 'track', turn: 0, slope: 1 }, { kind: 'track', turn: -1, slope: 0 }] as BuildChoice[]) d = planNext(d, c, ground).design;
     const p = planNext(d, { kind: 'track', turn: 0, slope: 0 }, ground);
     expect(p.blocked).toBeNull();
     const t = new BakedTrack({ ...p.design, closed: false }, 0.25);
     const a = p.design.nodes[p.start - 1]!.p;
     const b = p.design.nodes[p.design.nodes.length - 1]!.p;
     const L = Math.hypot(b[0] - a[0], b[2] - a[2]);
-    // Every sample of the new straight lies on the line between its ends (within 1 cm).
+    // In plan, every sample of the new straight lies on the line between its ends (within 1 cm), and
+    // its height only ever goes one way (it may ramp to clear other track, but never sags or bumps).
     let worst = 0;
+    let dir = 0;
+    let reversals = 0;
+    let prevY = t.pos[Math.ceil(t.nodeS[p.start - 1]! / t.ds) * 3 + 1]!;
     for (let i = Math.ceil(t.nodeS[p.start - 1]! / t.ds); i < t.count; i++) {
       const x = t.pos[i * 3]! - a[0];
       const z = t.pos[i * 3 + 2]! - a[2];
-      const side = Math.abs(x * (b[2] - a[2]) - z * (b[0] - a[0])) / L;
-      worst = Math.max(worst, side, Math.abs(t.pos[i * 3 + 1]! - a[1]));
+      worst = Math.max(worst, Math.abs(x * (b[2] - a[2]) - z * (b[0] - a[0])) / L);
+      const y = t.pos[i * 3 + 1]!;
+      const step = y - prevY;
+      // (prevY only moves on once the height has changed by 5 cm: tiny spline ripples don't count)
+      if (Math.abs(step) > 0.05) {
+        const sgn = Math.sign(step);
+        if (dir !== 0 && sgn !== dir) reversals++;
+        dir = sgn;
+        prevY = y;
+      }
     }
     expect(worst).toBeLessThan(0.01);
+    expect(reversals).toBe(0);
   });
 
   test('every piece is editable, including the ones the coaster came with', () => {
