@@ -38,52 +38,87 @@ function Modal(props: { title: string; onClose: () => void; children: ReactNode;
 }
 
 export function Welcome() {
+  const returning = useGame((s) => s.returning);
+  const name = useGame((s) => s.coasterName);
   const close = () => useGame.setState({ overlay: 'none' });
   const g = useGame.getState;
   return (
-    <div className="cc-welcome" role="dialog" aria-label="Welcome to Cozy Coaster">
-      <h1>Cozy Coaster</h1>
-      <p>Build at your own pace. There's nothing to win and nowhere to be.</p>
-      <div className="cc-welcome-actions">
-        <Button
-          variant="accent"
-          icon="play"
-          wide
-          onClick={() => {
-            void services.engine?.audio.unlock();
-            close();
-          }}
-        >
-          Continue
+    <div className="cc-welcome-wrap">
+      <div className="cc-welcome" role="dialog" aria-label="Welcome to Cozy Coaster">
+        <h1>Cozy Coaster</h1>
+        <p>{returning ? `Welcome back. ${name} is just as you left it.` : "Build at your own pace. There's nothing to win and nowhere to be."}</p>
+        <div className="cc-welcome-actions">
+          <Button variant="accent" icon="play" wide onClick={close}>
+            {returning ? 'Continue' : 'Explore the meadow'}
+          </Button>
+          <Button
+            icon="build"
+            wide
+            onClick={() => {
+              g().newWorld({ blank: true });
+              useGame.setState({ overlay: 'none', panel: 'build' });
+              g().toast('Tap a piece to add it. Your track always joins back up to the station.');
+            }}
+          >
+            {returning ? 'Start a new coaster' : 'Build your own coaster'}
+          </Button>
+          <Button
+            icon="ride"
+            wide
+            onClick={() => {
+              useGame.setState({ overlay: 'none', panel: 'ride', camera: 'front' });
+              services.engine?.dispatch();
+            }}
+          >
+            Take a ride
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function MenuDialog() {
+  const s = useGame((st) => st.settings);
+  const name = useGame((st) => st.coasterName);
+  const close = () => (ui('close'), useGame.setState({ overlay: 'none' }));
+  const set = (fn: (s: Settings) => Settings) => useGame.getState().setSettings(fn);
+  const musicOn = s.audio.music > 0.01 && !s.audio.muted;
+  return (
+    <Modal title="Menu" onClose={close}>
+      <label className="cc-field">
+        <span>Coaster name</span>
+        <input value={name} maxLength={40} onChange={(e) => useGame.setState({ coasterName: e.target.value })} />
+      </label>
+      <Toggle
+        label="Music"
+        hint="Calm lo-fi beats"
+        checked={musicOn}
+        onChange={(v) => {
+          void services.engine?.audio.unlock();
+          set((x) => ({ ...x, audio: { ...x.audio, muted: false, music: v ? Math.max(0.5, x.audio.music) : 0 } }));
+        }}
+      />
+      <Slider label="Volume" value={s.audio.muted ? 0 : s.audio.master} min={0} max={1} step={0.05} format={(v) => `${Math.round(v * 100)}%`} onChange={(v) => set((x) => ({ ...x, audio: { ...x.audio, master: v, muted: v === 0 } }))} />
+      <div className="cc-menu-list">
+        <Button icon="folder" wide onClick={() => useGame.setState({ overlay: 'saves' })}>
+          Your parks
         </Button>
         <Button
-          icon="build"
+          icon="plus"
           wide
           onClick={() => {
-            void services.engine?.audio.unlock();
-            g().newWorld({ blank: true });
-            useGame.setState({ overlay: 'none', panel: 'build', previewActive: true, preset: 'track' });
-            g().toast('Drag the ring at the end of the track to steer, and the arrow to raise it. Tap Place when it looks right.');
+            useGame.getState().newWorld({ blank: true });
+            useGame.setState({ overlay: 'none', panel: 'build' });
           }}
         >
-          Create a new coaster
+          New coaster
         </Button>
-        <Button
-          icon="ride"
-          wide
-          onClick={() => {
-            void services.engine?.audio.unlock();
-            useGame.setState({ overlay: 'none', panel: 'ride', camera: 'front' });
-            services.engine?.dispatch();
-          }}
-        >
-          Take a ride
+        <Button icon="settings" wide onClick={() => useGame.setState({ overlay: 'settings' })}>
+          Settings
         </Button>
       </div>
-      <button className="cc-link" onClick={close}>
-        Skip
-      </button>
-    </div>
+    </Modal>
   );
 }
 
@@ -244,7 +279,7 @@ export function SavesDialog() {
             await saves.flush();
             g().newWorld({ blank: true });
             close();
-            useGame.setState({ panel: 'build', previewActive: true });
+            useGame.setState({ panel: 'build' });
           }}
         >
           New park

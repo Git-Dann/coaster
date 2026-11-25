@@ -32,15 +32,9 @@ test('launches straight into the world with a working starter coaster', async ({
   await page.goto('/');
   await ready(page);
   await expect(page.getByRole('dialog', { name: 'Welcome to Cozy Coaster' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Continue' })).toBeVisible();
-  // The canvas is not blank: sample pixel variance.
-  const variance = await page.evaluate(() => {
-    const e = (window as any).__cozy.engine;
-    const url: string = e.capture('image/png');
-    return url.length;
-  });
-  expect(variance).toBeGreaterThan(50_000);
-  // The starter train is genuinely simulated: dispatch and watch it move.
+  await expect(page.getByRole('button', { name: 'Explore the meadow' })).toBeVisible();
+  const size = await page.evaluate(() => (window as any).__cozy.engine.capture('image/png').length);
+  expect(size).toBeGreaterThan(50_000);
   const s0 = await page.evaluate(() => (window as any).__cozy.engine.sim.s);
   await page.getByRole('button', { name: 'Take a ride' }).click();
   await page.waitForTimeout(4000);
@@ -49,66 +43,52 @@ test('launches straight into the world with a working starter coaster', async ({
   await page.screenshot({ path: `test-results/visual/${test.info().project.name}-ride.png` });
 });
 
-test('build: raise the track end, watch supports grow, place, undo and redo', async ({ page }) => {
+const connected = (page: Page) =>
+  page.evaluate(() => {
+    const e = (window as any).__cozy.engine;
+    return e.ridden.closed && e.track.diagnostics.maxGap < 1e-6 && !e.track.diagnostics.seamFlip;
+  });
+const nodeCount = (page: Page) => page.evaluate(() => (window as any).__cozy.store.getState().design.nodes.length);
+
+test('build: tap pieces, adjust with the lever, remove, undo and redo; the track always stays connected', async ({ page }) => {
   await page.goto('/');
   await ready(page);
-  await page.getByRole('button', { name: 'Create a new coaster' }).click();
-  const start = await page.evaluate(() => (window as any).__cozy.store.getState().design.nodes.length);
-  const project = () =>
-    page.evaluate(() => {
-      const e = (window as any).__cozy.engine;
-      const h = e.handles.end;
-      const v = e.rig.camera.position.clone().set(h[0], h[1] + 3.2, h[2]).project(e.rig.camera);
-      const r = e.renderer.domElement.getBoundingClientRect();
-      return [r.left + ((v.x + 1) / 2) * r.width, r.top + ((1 - v.y) / 2) * r.height] as [number, number];
-    });
-  // Wait for the camera to finish easing into place before grabbing the handle.
-  let handle = await project();
-  for (let i = 0; i < 40; i++) {
-    await page.waitForTimeout(250);
-    const next = await project();
-    const still = Math.hypot(next[0] - handle[0], next[1] - handle[1]) < 0.5;
-    handle = next;
-    if (still) break;
+  await page.getByRole('button', { name: 'Explore the meadow' }).click();
+  await page.getByRole('button', { name: 'Build', exact: true }).click();
+  const n0 = await nodeCount(page);
+  for (const name of ['Left', 'Up', 'Hill', 'Right']) {
+    await page.getByRole('button', { name, exact: true }).click();
+    expect(await connected(page)).toBe(true);
   }
-  const vp = page.viewportSize()!;
-  expect(handle[0]).toBeGreaterThan(0);
-  expect(handle[0]).toBeLessThan(vp.width);
-  expect(handle[1]).toBeGreaterThan(70);
-  expect(handle[1]).toBeLessThan(vp.height * 0.55);
-  const topY = () =>
-    page.evaluate(() => {
-      const t = (window as any).__cozy.engine.previewTrack;
-      let m = -Infinity;
-      for (let i = 0; i < t.count; i++) m = Math.max(m, t.pos[i * 3 + 1]);
-      return m;
-    });
-  const heightBefore = await topY();
-  await page.mouse.move(handle[0], handle[1]);
-  await page.mouse.down();
-  for (let i = 1; i <= 8; i++) await page.mouse.move(handle[0], handle[1] - i * 15);
-  await page.mouse.up();
-  await page.waitForTimeout(800);
-  const rise = await page.evaluate(() => (window as any).__cozy.store.getState().params.rise);
-  expect(rise).toBeGreaterThan(1);
-  expect(await topY()).toBeGreaterThan(heightBefore + 1);
-  expect(await page.evaluate(() => (window as any).__cozy.engine.supports.instanceCount)).toBeGreaterThan(0);
+  const n1 = await nodeCount(page);
+  expect(n1).toBeGreaterThan(n0);
+  const endY = () => page.evaluate(() => {
+    const d = (window as any).__cozy.store.getState().design;
+    return d.nodes[d.nodes.length - 1].p[1];
+  });
+  const y0 = await endY();
+  await page.getByRole('button', { name: 'Higher' }).click();
+  await page.getByRole('button', { name: 'Higher' }).click();
+  await expect.poll(endY).toBeGreaterThan(y0 + 1);
+  expect(await connected(page)).toBe(true);
   await page.screenshot({ path: `test-results/visual/${test.info().project.name}-build.png` });
-  await page.getByRole('button', { name: 'Place' }).click();
-  await expect.poll(() => page.evaluate(() => (window as any).__cozy.store.getState().design.nodes.length)).toBeGreaterThan(start);
+  await page.getByRole('button', { name: 'Remove the last piece' }).click();
+  await expect.poll(() => nodeCount(page)).toBeLessThan(n1);
+  expect(await connected(page)).toBe(true);
+  const n2 = await nodeCount(page);
   await page.getByRole('button', { name: /^Undo/ }).click();
-  await expect.poll(() => page.evaluate(() => (window as any).__cozy.store.getState().design.nodes.length)).toBe(start);
+  await expect.poll(() => nodeCount(page)).toBeGreaterThan(n2);
   await page.getByRole('button', { name: /^Redo/ }).click();
-  await expect.poll(() => page.evaluate(() => (window as any).__cozy.store.getState().design.nodes.length)).toBeGreaterThan(start);
+  await expect.poll(() => nodeCount(page)).toBe(n2);
+  expect(await connected(page)).toBe(true);
 });
 
-test('a two-finger pinch moves the camera and never places track', async ({ page }) => {
+test('a two-finger pinch moves the camera and never builds', async ({ page }) => {
   await page.goto('/');
   await ready(page);
-  await page.getByRole('button', { name: 'Create a new coaster' }).click();
-  await page.waitForTimeout(1500);
+  await page.getByRole('button', { name: 'Explore the meadow' }).click();
+  await page.getByRole('button', { name: 'Build', exact: true }).click();
   const before = await page.evaluate(() => ({ n: (window as any).__cozy.store.getState().design.nodes.length, d: (window as any).__cozy.engine.rig.distance }));
-  // Synthesise a pinch with two pointers on the canvas.
   await page.evaluate(async () => {
     const c = document.querySelector('canvas')!;
     const r = c.getBoundingClientRect();
@@ -132,47 +112,64 @@ test('a two-finger pinch moves the camera and never places track', async ({ page
   expect(after.d).toBeLessThan(before.d);
 });
 
-test('six carriages, timber supports, gentle rain and a ride', async ({ page }) => {
+test('carriages change at any time, even mid-ride; timber, rain and riding all work', async ({ page }) => {
   await page.goto('/');
   await ready(page);
-  await page.getByRole('button', { name: 'Skip' }).click();
-  await page.getByRole('button', { name: 'Train', exact: true }).click();
+  await page.getByRole('button', { name: 'Explore the meadow' }).click();
+  await page.evaluate(() => (window as any).__cozy.engine.dispatch());
+  await page.waitForTimeout(1500);
+  await page.getByRole('button', { name: 'Paint', exact: true }).click();
+  await page.getByRole('tab', { name: 'Train' }).click();
   const more = page.getByRole('button', { name: 'More carriages' });
   while (await more.isEnabled()) await more.click();
   expect(await page.evaluate(() => (window as any).__cozy.engine.sim.cfg.cars)).toBe(6);
-  expect(await page.evaluate(() => (window as any).__cozy.engine.sim.mass)).toBeGreaterThan(4000);
-  await page.getByRole('button', { name: 'Style', exact: true }).click();
-  await page.getByRole('radio', { name: 'Pine', exact: true }).click();
-  await page.getByRole('button', { name: 'Weather', exact: true }).click();
-  await page.getByRole('radio', { name: 'Rain', exact: true }).click();
-  await page.waitForTimeout(3000);
-  const rain = await page.evaluate(() => (window as any).__cozy.engine.atmosphere.state.rain);
-  expect(rain).toBeGreaterThan(0.3);
+  await page.getByRole('button', { name: 'Fewer carriages' }).click();
+  expect(await page.evaluate(() => (window as any).__cozy.engine.sim.cfg.cars)).toBe(5);
+  await page.getByRole('tab', { name: 'Supports' }).click();
+  await page.getByRole('button', { name: 'Pine', exact: true }).click();
+  await page.getByRole('button', { name: 'Sky', exact: true }).click();
+  await page.getByRole('button', { name: 'Rain', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as any).__cozy.engine.atmosphere.state.rain), { timeout: 15_000 }).toBeGreaterThan(0.3);
   await page.getByRole('button', { name: 'Ride', exact: true }).click();
-  await page.getByRole('radio', { name: 'Follow' }).click();
-  await page.getByRole('button', { name: 'Dispatch' }).click();
-  await page.waitForTimeout(3000);
+  await page.getByRole('button', { name: 'Ride!' }).click();
+  expect(await page.evaluate(() => (window as any).__cozy.store.getState().camera)).toBe('front');
+  await page.waitForTimeout(2500);
   await page.screenshot({ path: `test-results/visual/${test.info().project.name}-rain-six-cars.png` });
 });
 
-test('progress saves automatically and survives a reload', async ({ page }) => {
+test('decorate: pick a tree and tap the ground to place it', async ({ page }) => {
   await page.goto('/');
   await ready(page);
-  await page.getByRole('button', { name: 'Skip' }).click();
-  await page.getByRole('button', { name: 'Style', exact: true }).click();
-  const name = page.getByLabel('Coaster name');
-  await name.fill('Willow Whirl');
+  await page.getByRole('button', { name: 'Explore the meadow' }).click();
+  await page.getByRole('button', { name: 'Decorate', exact: true }).click();
+  await page.getByRole('button', { name: 'Tree', exact: true }).click();
+  const box = await page.locator('canvas').boundingBox();
+  await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height * 0.3);
+  await expect.poll(() => page.evaluate(() => (window as any).__cozy.store.getState().scenery.length)).toBe(1);
+});
+
+test('menu switches toggle, and progress survives a reload', async ({ page }) => {
+  await page.goto('/');
+  await ready(page);
+  await page.getByRole('button', { name: 'Explore the meadow' }).click();
+  await page.getByRole('button', { name: /^Menu/ }).click();
+  const music = page.getByRole('switch', { name: /Music/ });
+  const was = await music.getAttribute('aria-checked');
+  await music.click();
+  await expect(music).toHaveAttribute('aria-checked', was === 'true' ? 'false' : 'true');
+  await page.getByLabel('Coaster name').fill('Willow Whirl');
   await expect.poll(() => page.evaluate(() => (window as any).__cozy.store.getState().saveStatus), { timeout: 20_000 }).toBe('saved');
   await page.reload();
   await ready(page);
-  await expect(page.getByRole('button', { name: /Willow Whirl/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Continue' })).toBeVisible();
+  await expect(page.getByText('Willow Whirl').first()).toBeVisible();
 });
 
 test('recovers from WebGL context loss without losing the world', async ({ page }) => {
   await page.goto('/');
   await ready(page);
-  await page.getByRole('button', { name: 'Skip' }).click();
-  const nodes = await page.evaluate(() => (window as any).__cozy.store.getState().design.nodes.length);
+  await page.getByRole('button', { name: 'Explore the meadow' }).click();
+  const nodes = await nodeCount(page);
   await page.evaluate(async () => {
     const gl = (window as any).__cozy.engine.renderer.getContext() as WebGL2RenderingContext;
     const ext = gl.getExtension('WEBGL_lose_context');
@@ -181,7 +178,7 @@ test('recovers from WebGL context loss without losing the world', async ({ page 
     ext?.restoreContext();
     await new Promise((r) => setTimeout(r, 1500));
   });
-  expect(await page.evaluate(() => (window as any).__cozy.store.getState().design.nodes.length)).toBe(nodes);
+  expect(await nodeCount(page)).toBe(nodes);
   expect(await page.evaluate(() => (window as any).__cozy.engine.renderer.getContext().isContextLost())).toBe(false);
 });
 
@@ -189,7 +186,7 @@ test('seeded visual scenes render without errors', async ({ page }) => {
   test.setTimeout(360_000);
   await page.goto('/');
   await ready(page, true);
-  await page.getByRole('button', { name: 'Skip' }).click();
+  await page.getByRole('button', { name: 'Explore the meadow' }).click();
   const scenes: Array<[string, Record<string, unknown>, Record<string, unknown>?]> = [
     ['woodland-timber', { biome: 'woodland', weather: 'mist', time: 'morning' }, { style: 'wood', supportStyle: 'walnut' }],
     ['alpine-steel', { biome: 'alpine', weather: 'clear', time: 'midday' }, { style: 'boxspine', supportStyle: 'galvanised' }],

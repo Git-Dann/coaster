@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { Engine } from '../engine/core/engine';
 import { useGame } from '../stores/game';
-import { connectStore, engineCallbacks, placePreview, cancelConnect } from './bridge';
+import { connectStore, engineCallbacks, removeLast } from './bridge';
 import { services, ui } from './services';
 import { saves, watchForSaves } from './persistence';
-import { BottomNav, Diagnostics, Hint, Telemetry, Toasts, TopBar } from '../components/Hud';
-import { BuildPanel, RidePanel, SceneryPanel, StylePanel, TrainPanel, WeatherPanel } from '../components/Panels';
-import { Compatibility, PhotoMode, RelaxOverlay, SavesDialog, SettingsDialog, Welcome } from '../components/Dialogs';
+import { installAudioUnlock } from './audio-unlock';
+import { BottomNav, Diagnostics, Telemetry, Toasts, TopBar } from '../components/Hud';
+import { BuildTray, DecorateTray, HeightLever, PaintTray, RideTray, SkyTray } from '../components/Trays';
+import { Compatibility, MenuDialog, PhotoMode, RelaxOverlay, SavesDialog, SettingsDialog, Welcome } from '../components/Dialogs';
 import '../components/ui.css';
 
 declare global {
@@ -31,6 +32,7 @@ export function App() {
     let engine: Engine;
     let disposeStore = () => {};
     let disposeSaves = () => {};
+    let disposeAudio = () => {};
     let cancelled = false;
     const boot = async () => {
       await saves.init();
@@ -50,6 +52,7 @@ export function App() {
       engine.setEnvironment(s.env);
       disposeStore = connectStore(engine);
       disposeSaves = watchForSaves();
+      disposeAudio = installAudioUnlock();
       engine.start();
       setReady(true);
     };
@@ -61,6 +64,7 @@ export function App() {
       ro.disconnect();
       disposeStore();
       disposeSaves();
+      disposeAudio();
       services.engine?.dispose();
       services.engine = null;
     };
@@ -106,17 +110,16 @@ export function App() {
       if (mod) return;
       switch (e.key) {
         case 'Escape':
-          if (g.connecting) cancelConnect();
-          else if (g.overlay !== 'none' && g.overlay !== 'welcome') useGame.setState({ overlay: 'none', camera: g.camera === 'relax' ? 'orbit' : g.camera });
+          if (g.overlay !== 'none' && g.overlay !== 'welcome') useGame.setState({ overlay: 'none', camera: g.camera === 'relax' ? 'orbit' : g.camera });
           else if (g.camera !== 'orbit') useGame.setState({ camera: 'orbit' });
-          else if (g.selectedNode) useGame.setState({ selectedNode: null, previewActive: true });
-          else if (g.panel !== 'none') useGame.setState({ panel: 'none', previewActive: false });
+          else if (g.panel !== 'none') useGame.setState({ panel: 'none' });
           break;
-        case 'Enter':
-          if (g.panel === 'build' && g.previewActive) placePreview();
+        case 'Backspace':
+        case 'Delete':
+          if (g.panel === 'build') removeLast();
           break;
         case 'b':
-          useGame.setState({ panel: g.panel === 'build' ? 'none' : 'build', previewActive: g.panel !== 'build' });
+          useGame.setState({ panel: g.panel === 'build' ? 'none' : 'build' });
           break;
         case 'f':
           services.engine?.frameCoaster();
@@ -167,18 +170,18 @@ export function App() {
       {ready && !immersive && (
         <>
           <TopBar />
-          <Hint />
+          <HeightLever />
           <Telemetry />
           <div className="cc-dock">
-            {panel === 'build' && <BuildPanel />}
-            {panel === 'train' && <TrainPanel />}
-            {panel === 'style' && <StylePanel />}
-            {panel === 'scenery' && <SceneryPanel />}
-            {panel === 'weather' && <WeatherPanel />}
-            {panel === 'ride' && <RidePanel />}
+            {panel === 'build' && <BuildTray />}
+            {panel === 'decorate' && <DecorateTray />}
+            {panel === 'paint' && <PaintTray />}
+            {panel === 'sky' && <SkyTray />}
+            {panel === 'ride' && <RideTray />}
             <BottomNav />
           </div>
           {overlay === 'welcome' && <Welcome />}
+          {overlay === 'menu' && <MenuDialog />}
           {overlay === 'settings' && <SettingsDialog />}
           {overlay === 'saves' && <SavesDialog />}
         </>

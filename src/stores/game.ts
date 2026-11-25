@@ -6,13 +6,14 @@ import type { EnvironmentState, SaveData, SceneryItem, SceneryType, Settings, Te
 import { CURRENT_SCHEMA } from '../types/world';
 import { cloneDesign } from '../engine/track/design-ops';
 import { defaultSettings, defaultTrain, DEFAULT_ENVIRONMENT, newSaveId } from '../features/saves';
-import { starterClosed } from '../engine/track/starter';
+import { starterPlayable } from '../engine/track/starter';
+import { freshCoaster, type ActivePiece } from '../features/builder/simple-builder';
 import { PAD_HEIGHT } from '../engine/terrain/heightfield';
 import type { PresetId } from '../features/builder/builder';
 import { presetById } from '../features/builder/builder';
 
-export type Panel = 'none' | 'build' | 'train' | 'style' | 'scenery' | 'weather' | 'ride';
-export type Overlay = 'none' | 'settings' | 'saves' | 'welcome' | 'photo' | 'relax' | 'about';
+export type Panel = 'none' | 'build' | 'decorate' | 'paint' | 'sky' | 'ride';
+export type Overlay = 'none' | 'menu' | 'settings' | 'saves' | 'welcome' | 'photo' | 'relax' | 'about';
 
 interface Snapshot {
   design: TrackDesign;
@@ -59,6 +60,16 @@ export interface GameState {
   previewSession: string;
   hint: string | null;
   connecting: boolean;
+  /** True when a previous park was restored on launch (welcome says Continue). */
+  returning: boolean;
+  /** The newest piece, adjustable until another is added. */
+  active: ActivePiece | null;
+  /** Decorate mode eraser. */
+  eraser: boolean;
+  /** Paint mode sub-tab. */
+  paintTab: 'track' | 'supports' | 'train';
+  /** Bottom sheet minimised to a compact strip so the world stays reachable. */
+  sheetCompact: boolean;
   selectedNode: string | null;
   sceneryTool: SceneryType | null;
   brush: TerrainBrush | null;
@@ -102,7 +113,7 @@ export function blankDesign(base: TrackDesign): TrackDesign {
   };
 }
 
-const starter = () => starterClosed(PAD_HEIGHT + 1);
+const starter = () => starterPlayable(PAD_HEIGHT + 1);
 
 export const useGame = create<GameState & GameActions>()((set, get) => ({
   saveId: newSaveId(),
@@ -133,6 +144,11 @@ export const useGame = create<GameState & GameActions>()((set, get) => ({
   previewSession: 'p0',
   hint: null,
   connecting: false,
+  returning: false,
+  active: null,
+  eraser: false,
+  paintTab: 'track',
+  sheetCompact: false,
   selectedNode: null,
   sceneryTool: null,
   brush: null,
@@ -165,6 +181,7 @@ export const useGame = create<GameState & GameActions>()((set, get) => ({
       future: [{ design: s.design, scenery: s.scenery, terrainEdits: s.terrainEdits }, ...s.future].slice(0, HISTORY),
       previewActive: false,
       selectedNode: null,
+      active: null,
     });
   },
   redo: () => {
@@ -177,6 +194,7 @@ export const useGame = create<GameState & GameActions>()((set, get) => ({
       past: [...s.past, { design: s.design, scenery: s.scenery, terrainEdits: s.terrainEdits }].slice(-HISTORY),
       previewActive: false,
       selectedNode: null,
+      active: null,
     });
   },
   setTrain: (t) => set({ train: { ...get().train, ...t, colours: { ...get().train.colours, ...(t.colours ?? {}) } } }),
@@ -216,7 +234,8 @@ export const useGame = create<GameState & GameActions>()((set, get) => ({
       saveName: opts?.blank ? 'New park' : 'Meadow park',
       coasterName: opts?.blank ? 'New coaster' : 'Bramble Flyer',
       created: Date.now(),
-      design: opts?.blank ? blankDesign(base) : base,
+      design: opts?.blank ? freshCoaster(base, PAD_HEIGHT + 1, () => PAD_HEIGHT + 0.5) : base,
+      active: null,
       train: defaultTrain(),
       physics: {},
       env: { ...s.env, biome: opts?.biome ?? s.env.biome, seed: opts?.seed ?? s.env.seed },

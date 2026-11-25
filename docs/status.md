@@ -54,10 +54,17 @@ Last updated 2026-11-24. This is an honest account of what is done, what is part
 - Ride physics follows the track centre line, not the heartline; couplings are rigid; no static friction. See `docs/physics.md`.
 - Inverted and near-vertical sections have no ground supports.
 - Flex is not applied to shadow maps (shadows stay rigid; the difference is millimetres to centimetres).
-- Removing a piece removes the last node, not the whole last element.
 - Biome changes regenerate distant chunks over a few seconds; far terrain briefly shows the previous biome.
-- Audio is untuned; the (Not Boring) Sound Kit is not used (licence unverified).
+- Audio, including the generative lo-fi music, has not yet been tuned by ear on real devices. The (Not Boring) Sound Kit is not used (licence unverified).
 - No haptics on iOS (no web API); `navigator.vibrate` is used where available.
 - WebGPU not evaluated.
 - Mobile overview draw calls (~187) exceed the 150 target.
 - IndexedDB code paths other than validation are covered only by the Chromium e2e reload test.
+
+## Build model (since the touch-first rework)
+
+- **Adding pieces:** tap a piece to add it straight away. The newest piece stays adjustable with the end ring, the height lever and the size buttons until another piece is added; adjusting it is the same undo step as adding it.
+- **Never disconnected:** an automatic return (a Dubins path with eased height, ground clearance, speed-matched banking and a brake run) always carries the train back into the station, so the circuit can never be left disconnected. A seeded fuzz test builds 40 random layouts and checks every circuit closes cleanly and simulates without errors.
+- **Removing:** "Remove last" removes the whole last piece. The station can't be removed.
+- **Carriages:** they can be changed at any time; the train simply returns to the station.
+- **Known gaps:** the automatic return can cross over or under your own track. It doesn't yet route around other track, so steep layouts may have the return pass close by.

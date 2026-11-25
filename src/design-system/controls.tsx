@@ -168,28 +168,27 @@ export function Swatches(props: { label: string; value: string; onChange: (v: st
   );
 }
 
+/** A whole-row switch: tapping anywhere on the row toggles it. */
 export function Toggle(props: { label: string; checked: boolean; onChange: (v: boolean) => void; hint?: string }) {
-  const id = useId();
   return (
-    <div className="cc-toggle">
-      <label htmlFor={id}>
+    <button
+      type="button"
+      role="switch"
+      aria-checked={props.checked}
+      className={`cc-toggle-row${props.checked ? ' on' : ''}`}
+      onClick={() => {
+        ui('toggle');
+        props.onChange(!props.checked);
+      }}
+    >
+      <span className="cc-toggle-text">
         <span>{props.label}</span>
         {props.hint && <small>{props.hint}</small>}
-      </label>
-      <button
-        id={id}
-        type="button"
-        role="switch"
-        aria-checked={props.checked}
-        className={props.checked ? 'on' : ''}
-        onClick={() => {
-          ui('toggle');
-          props.onChange(!props.checked);
-        }}
-      >
+      </span>
+      <span className="cc-toggle-track" aria-hidden="true">
         <span />
-      </button>
-    </div>
+      </span>
+    </button>
   );
 }
 
