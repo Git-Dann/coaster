@@ -151,6 +151,8 @@ function returnPath(design: TrackDesign, opt: ReturnOptions, R: number): { out: 
   const startPitch = Math.asin(Math.max(-1, Math.min(1, last.dir[1])));
 
   const out: TrackNode[] = [];
+  /** Lowest allowed height of each node: clear of the ground under and just before it. */
+  const floor: number[] = [];
   let x = start.x;
   let z = start.z;
   let h = start.h;
@@ -184,17 +186,20 @@ function returnPath(design: TrackDesign, opt: ReturnOptions, R: number): { out: 
       // Ease height from the end of the player's track to station height, honouring the start slope.
       const ease = u * u * (3 - 2 * u);
       const slopeCarry = Math.tan(startPitch) * total * (u - 2 * u * u + u * u * u);
-      let y = y0 + (y1 - y0) * ease + slopeCarry;
+      const y = y0 + (y1 - y0) * ease + slopeCarry;
       // Clear the ground here and on the way here (terrain can rise between nodes).
       const px = out.length ? out[out.length - 1]!.p[0] : last.p[0];
       const pz = out.length ? out[out.length - 1]!.p[2] : last.p[2];
       const g = Math.max(opt.groundAt(x, z), opt.groundAt((x + px) / 2, (z + pz) / 2), opt.groundAt(x * 0.75 + px * 0.25, z * 0.75 + pz * 0.25), opt.groundAt(x * 0.25 + px * 0.75, z * 0.25 + pz * 0.75));
-      y = Math.max(y, g + 1.3);
+      floor.push(g + GROUND_CLEARANCE);
       const nextKind = segs[si]!.kind;
-      const bank = wind + first.bank + (nextKind === 'S' ? 0 : (nextKind === 'L' ? -1 : 1) * bankMag * Math.min(1, Math.sin(Math.PI * Math.min(1, (k + 1) / n)) * 3));
+      // Target banking: level on straights, banked through turns (smoothed below).
+      const bank = wind + first.bank + (nextKind === 'S' ? 0 : (nextKind === 'L' ? -1 : 1) * bankMag);
       out.push({ id: `ret_${si}_${k}`, p: [x, y, z], dir: [Math.cos(h), 0, -Math.sin(h)], bank, kind: 'track', group: 'return' });
     }
   }
+  smoothProfile(out, floor, y0, y1, last.bank, first.bank + wind);
+  const floorOf = new Map<TrackNode, number>(out.map((nd, i) => [nd, floor[i]!]));
   // Give nodes slopes consistent with their neighbours' heights.
   for (let i = 0; i < out.length; i++) {
     const prev = i === 0 ? last.p : out[i - 1]!.p;
@@ -224,7 +229,36 @@ function returnPath(design: TrackDesign, opt: ReturnOptions, R: number): { out: 
   // The return must never pass through the player's track: lift it over (or under) crossings.
   // The final brake run into the station stays level.
   const temp: TrackDesign = { ...design, nodes: [...design.nodes.map((n) => ({ ...n, p: [...n.p] as V3, dir: [...n.dir] as V3 })), ...out], closed: true };
-  const clear = separateCrossings(temp, design.nodes.length, opt.groundAt, 2, true);
+  const heightsBefore = new Map<TrackNode, number>(out.map((nd) => [nd, nd.p[1]]));
+  let clear = separateCrossings(temp, design.nodes.length, opt.groundAt, 2, true);
+  // Crossing your track lifts (or lowers) just the nodes at the crossing, which would leave a dip
+  // before a hump. Re-smooth with those heights as limits, so the return stays up until it's over
+  // your track and then comes down once, then check the crossings again.
+  const body = out[out.length - 1]?.kind === 'brake' ? out.slice(0, -1) : out.slice();
+  if (body.some((nd) => Math.abs(nd.p[1] - (heightsBefore.get(nd) ?? nd.p[1])) > 0.05)) {
+    const lo = body.map((nd) => {
+      const was = heightsBefore.get(nd) ?? nd.p[1];
+      return nd.p[1] > was + 0.05 ? nd.p[1] : (floorOf.get(nd) ?? -Infinity);
+    });
+    const hi = body.map((nd) => {
+      const was = heightsBefore.get(nd) ?? nd.p[1];
+      return nd.p[1] < was - 0.05 ? nd.p[1] : Infinity;
+    });
+    smoothProfile(body, lo, y0, y1, last.bank, first.bank + wind, hi, 0);
+    const again: TrackDesign = { ...design, nodes: [...design.nodes.map((n) => ({ ...n, p: [...n.p] as V3, dir: [...n.dir] as V3 })), ...out], closed: true };
+    clear = separateCrossings(again, design.nodes.length, opt.groundAt, 2, true);
+  }
+  // Slopes follow the final heights.
+  for (let i = 0; i < out.length; i++) {
+    const nd = out[i]!;
+    if (nd.kind === 'brake' && i === out.length - 1) continue;
+    const prev = i === 0 ? last.p : out[i - 1]!.p;
+    const next = out[i + 1]?.p ?? [goal.x, y1, goal.z];
+    const run = Math.hypot(next[0]! - prev[0]!, next[2]! - prev[2]!) || 1;
+    const pitch = Math.atan2(next[1]! - prev[1]!, run) * 0.9;
+    const hh = headingOf(nd.dir);
+    nd.dir = [Math.cos(hh) * Math.cos(pitch), Math.sin(pitch), -Math.sin(hh) * Math.cos(pitch)];
+  }
   // A trim brake halfway round keeps very fast layouts from arriving too quickly.
   const mid = out[Math.floor(out.length * 0.6)];
   if (mid && mid !== out[out.length - 1]) {
@@ -232,6 +266,43 @@ function returnPath(design: TrackDesign, opt: ReturnOptions, R: number): { out: 
     mid.param = 12;
   }
   return { out, clear };
+}
+
+const GROUND_CLEARANCE = 1.3;
+
+/**
+ * Make the return ride smoothly: a coaster's track never copies every rise and dip of the ground.
+ * Heights become a smooth curve that floats over the terrain (a taut, rounded line above it, with a
+ * little margin so the rounding never dips below the clearance), and banking eases in and out of
+ * each turn over a couple of nodes instead of switching at a single node. Both ends stay pinned to
+ * the player's track and to the station.
+ */
+function smoothProfile(nodes: TrackNode[], floor: number[], yStart: number, yEnd: number, bankStart: number, bankEnd: number, ceil?: number[], margin = 1.2): void {
+  const n = nodes.length;
+  if (n === 0) return;
+  const cap = (i: number, v: number) => (ceil ? Math.min(ceil[i]!, v) : v);
+  const y = nodes.map((nd, i) => cap(i, Math.max(nd.p[1], floor[i]! + margin)));
+  const at = (a: number[], i: number, lo: number, hi: number) => (i < 0 ? lo : i >= n ? hi : a[i]!);
+  // Lift over the terrain like a string pulled taut over it, rounded off at each contact.
+  for (let pass = 0; pass < 80; pass++) {
+    for (let i = 0; i < n; i++) {
+      const avg = (at(y, i - 1, yStart, yEnd) + 2 * y[i]! + at(y, i + 1, yStart, yEnd)) / 4;
+      y[i] = cap(i, Math.max(floor[i]! + margin, avg));
+    }
+  }
+  // A few free passes round off the contact points; the margin keeps them above the clearance.
+  for (let pass = 0; pass < 4; pass++) {
+    const prev = y.slice();
+    for (let i = 0; i < n; i++) y[i] = (at(prev, i - 1, yStart, yEnd) + 2 * prev[i]! + at(prev, i + 1, yStart, yEnd)) / 4;
+  }
+  for (let i = 0; i < n; i++) nodes[i]!.p[1] = cap(i, Math.max(y[i]!, floor[i]!));
+  // Banking: ease between level and banked over neighbouring nodes.
+  let b = nodes.map((nd) => nd.bank);
+  for (let pass = 0; pass < 6; pass++) {
+    const prev = b;
+    b = prev.map((v, i) => (at(prev, i - 1, bankStart, bankEnd) + 2 * v + at(prev, i + 1, bankStart, bankEnd)) / 4);
+  }
+  for (let i = 0; i < n; i++) nodes[i]!.bank = b[i]!;
 }
 
 /** The ridden circuit: the player's design plus the automatic return (closed). */

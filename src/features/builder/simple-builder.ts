@@ -304,7 +304,9 @@ export function roughness(design: TrackDesign, start: number, choice: BuildChoic
       pivot = y;
     } else if ((dir > 0 && y > pivot) || (dir < 0 && y < pivot)) pivot = y;
   }
-  const allowed = (id ? NATURAL_BUMPS[id] ?? 1 : 1) + 1;
+  // Plain track is one smooth rise, fall or level run: no bumps at all. Elements keep their natural
+  // shape plus a little allowance for the join.
+  const allowed = id ? (NATURAL_BUMPS[id] ?? 1) + 1 : 0;
   if (bumps > allowed || dk > maxDk * 1.15 || k > maxK * 1.15) return 'Too close to other track to fit smoothly here. Try another direction, or go up or down first';
   return null;
 }

@@ -94,14 +94,24 @@ export function App() {
     }, 500);
     // Keep the page and browser-bar colour in step with the sky (no per-frame work: every 2 s).
     let lastBg = '';
+    let lastBottom = '';
     const bgTimer = window.setInterval(() => {
       const e = services.engine;
       if (!e) return;
       const hex = `#${e.atmosphere.fog.color.getHexString()}`;
-      if (hex === lastBg) return;
-      lastBg = hex;
-      document.documentElement.style.setProperty('--scene-bg', hex);
-      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', hex);
+      if (hex !== lastBg) {
+        lastBg = hex;
+        document.documentElement.style.setProperty('--scene-bg', hex);
+        document.querySelector('meta[name="theme-color"]')?.setAttribute('content', hex);
+      }
+      // What shows under a phone's floating bottom toolbar: the colour at the bottom of the
+      // picture (usually grass), sampled after the next frame and applied on the following tick.
+      const bottom = e.bottomEdgeColour;
+      if (bottom && bottom !== lastBottom) {
+        lastBottom = bottom;
+        document.documentElement.style.setProperty('--scene-bg-bottom', bottom);
+      }
+      e.requestEdgeSample();
     }, 2000);
     return () => {
       cancelled = true;
