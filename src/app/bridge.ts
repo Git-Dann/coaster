@@ -410,10 +410,18 @@ function onHandleDrag(kind: 'plan' | 'height', phase: 'start' | 'move' | 'end' |
 function onTap(hit: PickResult): void {
   const g = useGame.getState();
   if (g.panel === 'build') {
-    // Edit mode: tap your track to select a piece; tap the station or open ground to go back to the end.
+    // Edit mode: tap any piece to select it; the station and the automatic return explain
+    // themselves and take you to the end, where new pieces join on.
     if (hit.type === 'track') {
       const group = g.design.nodes[hit.node]?.group;
-      selectPiece(group && group !== 'station' ? group : null);
+      if (group && group !== 'station') selectPiece(group);
+      else {
+        selectPiece(null);
+        g.toast('That is the station. New pieces join on at the end of your track.');
+      }
+    } else if (hit.type === 'return') {
+      selectPiece(null);
+      g.toast('This stretch is automatic: it always brings the train home, and reshapes itself as you add pieces.');
     } else if (hit.type === 'ground' && g.editSel) selectPiece(null);
     return;
   }

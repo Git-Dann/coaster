@@ -136,7 +136,7 @@ export class CameraRig {
       case 'rear': {
         const m = this.mode === 'front' ? lead : rear;
         m.extractBasis(fwd, upv, right);
-        const pos = tmpV.setFromMatrixPosition(m).addScaledVector(upv, 1.6).addScaledVector(fwd, this.mode === 'front' ? 0.1 : -0.6);
+        const pos = tmpV.setFromMatrixPosition(m).addScaledVector(upv, this.mode === 'front' ? 1.78 : 1.6).addScaledVector(fwd, this.mode === 'front' ? 0.45 : -0.6);
         // Rider-like view with optional horizon stabilisation (comfort setting).
         const lookUp = tmpV2.copy(upv).lerp(new THREE.Vector3(0, Math.sign(upv.y) || 1, 0), this.stabilisation).normalize();
         tmpM.lookAt(ORIGIN, fwd, lookUp);

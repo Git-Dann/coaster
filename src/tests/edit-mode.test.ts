@@ -163,10 +163,12 @@ describe('edit mode builds on the grid', () => {
     for (const c of built) d = planNext(d, c, ground).design;
     const mine = piecesOf(d).filter((p) => p.choice);
     expect(mine.map((p) => p.choice)).toEqual(built);
-    // Change the second piece into a loop: same number of pieces, the rest keep their choices.
-    const r = replacePiece(d, mine[1]!.group, { kind: 'special', id: 'loop' }, ground);
+    // Change the second piece (a right turn) into a left turn: same number of pieces, the rest keep their choices.
+    const swap: BuildChoice = { kind: 'track', turn: -1, slope: 0 };
+    expect(planNext({ ...d, nodes: d.nodes.slice(0, mine[1]!.start) }, swap, ground).blocked).toBeNull();
+    const r = replacePiece(d, mine[1]!.group, swap, ground);
     const after = piecesOf(r.design).filter((p) => p.choice);
-    expect(after.map((p) => p.choice)).toEqual([built[0], { kind: 'special', id: 'loop' }, ...built.slice(2)]);
+    expect(after.map((p) => p.choice)).toEqual([built[0], swap, ...built.slice(2)]);
     expect(r.dropped).toBe(0);
     const end = r.design.nodes[r.design.nodes.length - 1]!;
     expect(onGrid(gridFrame(r.design), end.p, end.dir)).toBe(true);
@@ -174,7 +176,7 @@ describe('edit mode builds on the grid', () => {
     expect(JSON.stringify(r.design.nodes.slice(0, mine[1]!.start).map((n) => n.p))).toBe(JSON.stringify(d.nodes.slice(0, mine[1]!.start).map((n) => n.p)));
     // Remove the third piece: one fewer, order kept.
     const rm = replacePiece(r.design, after[2]!.group, null, ground);
-    expect(piecesOf(rm.design).filter((p) => p.choice).map((p) => p.choice)).toEqual([built[0], { kind: 'special', id: 'loop' }, ...built.slice(3)]);
+    expect(piecesOf(rm.design).filter((p) => p.choice).map((p) => p.choice)).toEqual([built[0], swap, ...built.slice(3)]);
     const t = new BakedTrack(withReturn(rm.design, { groundAt: ground, speed: 15 }));
     expect(worstClash(t)).toBeGreaterThanOrEqual(MIN_VERTICAL - 0.6);
     expect(t.diagnostics.seamFlip).toBe(false);
@@ -225,6 +227,44 @@ describe('edit mode builds on the grid', () => {
     const d = (lift.blocked === null ? lift : launch).design;
     const ok = choices.filter((c) => c.kind === 'track' && !planNext(d, c, ground).blocked);
     expect(ok.length).toBeGreaterThan(0);
+  });
+
+  test('a straight stays straight: no sag after a climb, no sideways wander after a turn', () => {
+    let d = starterPlayable(PAD_HEIGHT + 1);
+    for (const c of [{ kind: 'track', turn: 0, slope: 1 }, { kind: 'track', turn: 1, slope: 0 }] as BuildChoice[]) d = planNext(d, c, ground).design;
+    const p = planNext(d, { kind: 'track', turn: 0, slope: 0 }, ground);
+    expect(p.blocked).toBeNull();
+    const t = new BakedTrack({ ...p.design, closed: false }, 0.25);
+    const a = p.design.nodes[p.start - 1]!.p;
+    const b = p.design.nodes[p.design.nodes.length - 1]!.p;
+    const L = Math.hypot(b[0] - a[0], b[2] - a[2]);
+    // Every sample of the new straight lies on the line between its ends (within 1 cm).
+    let worst = 0;
+    for (let i = Math.ceil(t.nodeS[p.start - 1]! / t.ds); i < t.count; i++) {
+      const x = t.pos[i * 3]! - a[0];
+      const z = t.pos[i * 3 + 2]! - a[2];
+      const side = Math.abs(x * (b[2] - a[2]) - z * (b[0] - a[0])) / L;
+      worst = Math.max(worst, side, Math.abs(t.pos[i * 3 + 1]! - a[1]));
+    }
+    expect(worst).toBeLessThan(0.01);
+  });
+
+  test('every piece is editable, including the ones the coaster came with', () => {
+    const d = starterPlayable(PAD_HEIGHT + 1);
+    const pieces = piecesOf(d);
+    expect(pieces.length).toBeGreaterThan(5);
+    let total = 0;
+    for (const p of pieces) {
+      const rm = replacePiece(d, p.group, null, ground);
+      // Removed, and the pieces after it are carried along (only ones that truly can't fit are left out).
+      expect(piecesOf(rm.design).some((q) => q.group === p.group)).toBe(false);
+      total += rm.dropped;
+      const t = new BakedTrack(withReturn(rm.design, { groundAt: ground, speed: 12 }));
+      expect(t.closed).toBe(true);
+      expect(worstClash(t)).toBeGreaterThanOrEqual(MIN_VERTICAL - 0.6);
+    }
+    // Most later pieces survive any single removal.
+    expect(total).toBeLessThan(pieces.length);
   });
 
   test('a drop at ground level is not offered (it needs height), and is offered once there is height', () => {

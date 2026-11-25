@@ -245,7 +245,7 @@ export function energyWalk(t: BakedTrack, roughness = 1, fromS = 0, v0 = 2): { s
     const dy = t.pos[i * 3 + 1]! - t.pos[(i - step) * 3 + 1]!;
     const kind = t.kind[i]!;
     const param = t.param[i]!;
-    const curv = t.curv[i]!;
+    const curv = Math.hypot(t.curv[i * 3]!, t.curv[i * 3 + 1]!, t.curv[i * 3 + 2]!);
     const v2 = v * v - 2 * g * dy - 2 * (mu * g * (1 + (curv * v * v) / g) + k * v * v) * ds;
     v = Math.sqrt(Math.max(0, v2));
     if (kind === KIND_LIFT) v = Math.max(v, param || 3.4);
@@ -264,7 +264,9 @@ export function energyWalk(t: BakedTrack, roughness = 1, fromS = 0, v0 = 2): { s
 /** How many up-and-down bumps each kind of piece naturally has (plain track: one gentle ramp). */
 const NATURAL_BUMPS: Partial<Record<PieceId, number>> = { hill: 2, loop: 2, roll: 2, corkscrew: 2, lift: 1, drop: 1, helix: 1 };
 /** Tightest natural curvature (1/m) of each element; plain track and joins stay far gentler. */
-const MAX_CURVATURE: Partial<Record<PieceId, number>> = { loop: 0.2, roll: 0.24, corkscrew: 0.24, hill: 0.13, lift: 0.13, drop: 0.13, helix: 0.1 };
+const MAX_CURVATURE: Partial<Record<PieceId, number>> = { loop: 0.3, roll: 0.3, corkscrew: 0.34, hill: 0.18, lift: 0.14, drop: 0.21, helix: 0.13 };
+/** Fastest natural change in curvature (1/m per m) of each element; plain track eases in and out of its turns. */
+const MAX_CURVATURE_RATE: Partial<Record<PieceId, number>> = { loop: 0.35, roll: 0.3, corkscrew: 0.48, drop: 0.28, hill: 0.2 };
 
 /**
  * Smoothness check for a planned piece (and the join into it): no wobbles (more vertical bumps than
@@ -274,12 +276,17 @@ const MAX_CURVATURE: Partial<Record<PieceId, number>> = { loop: 0.2, roll: 0.24,
 export function roughness(design: TrackDesign, start: number, choice: BuildChoice): string | null {
   const part = new BakedTrack({ ...design, closed: false, nodes: design.nodes.slice(Math.max(0, start - 1)) }, 0.25);
   const id = choice.kind === 'special' ? choice.id : null;
-  const maxK = (id && MAX_CURVATURE[id]) ?? 0.11;
+  const maxK = (id && MAX_CURVATURE[id]) ?? 0.14;
+  const maxDk = (id && MAX_CURVATURE_RATE[id]) ?? 0.2;
   let k = 0;
   let dk = 0;
   for (let i = 4; i < part.count - 4; i++) {
-    k = Math.max(k, part.curv[i]!);
-    dk = Math.max(dk, Math.abs(part.curv[i + 2]! - part.curv[i - 2]!) / (4 * part.ds));
+    const c = part.curv;
+    k = Math.max(k, Math.hypot(c[i * 3]!, c[i * 3 + 1]!, c[i * 3 + 2]!));
+    // Change of the curvature vector (size and direction) per metre: catches wobbles and kinks.
+    const a = (i - 2) * 3;
+    const b = (i + 2) * 3;
+    dk = Math.max(dk, Math.hypot(c[b]! - c[a]!, c[b + 1]! - c[a + 1]!, c[b + 2]! - c[a + 2]!) / (4 * part.ds));
   }
   // Count height turning points with some prominence (ignoring sub-50 cm ripples).
   let bumps = 0;
@@ -298,7 +305,7 @@ export function roughness(design: TrackDesign, start: number, choice: BuildChoic
     } else if ((dir > 0 && y > pivot) || (dir < 0 && y < pivot)) pivot = y;
   }
   const allowed = (id ? NATURAL_BUMPS[id] ?? 1 : 1) + 1;
-  if (bumps > allowed || dk > 0.4 || k > maxK * 1.15) return 'Too close to other track to fit smoothly here. Try another direction, or go up or down first';
+  if (bumps > allowed || dk > maxDk * 1.15 || k > maxK * 1.15) return 'Too close to other track to fit smoothly here. Try another direction, or go up or down first';
   return null;
 }
 
@@ -641,17 +648,46 @@ export function replacePiece(design: TrackDesign, group: string, choice: BuildCh
     tail.param = undefined;
   }
   let dropped = 0;
-  const later = pieces.slice(k + 1);
-  const seq: BuildChoice[] = choice ? [choice] : [];
-  for (const p of later) {
-    if (!p.choice) {
-      dropped = later.length - later.indexOf(p);
-      break;
-    }
-    seq.push(p.choice);
+  if (choice) d = planNext(d, choice, ground, committed).design;
+  // Everything after flows on from the new shape: pieces built from the panel are re-planned; pieces
+  // that came with the coaster (or older saves) are carried along whole and re-attached at the new
+  // joint. A piece that can no longer fit cleanly (a drop with no height left above it, say) is
+  // left out and the rest carry on without it (counted in `dropped`).
+  for (const p of pieces.slice(k + 1)) {
+    const next = p.choice ? planNext(d, p.choice, ground, committed) : null;
+    const moved = next ? (next.blocked ? null : next.design) : carryPiece(design, p, d, ground);
+    if (moved) d = moved;
+    else dropped++;
   }
-  for (const c of seq) d = planNext(d, c, ground, committed).design;
   return { design: d, start, dropped };
+}
+
+/**
+ * Re-attach a whole piece (one not built from the panel) to the end of `d`: turned and moved so it
+ * starts where `d` now ends, its shape untouched. Returns null if it can't join smoothly there
+ * (a different climb angle or banking at the joint), or would hit the ground or other track.
+ */
+function carryPiece(original: TrackDesign, p: PieceInfo, d: TrackDesign, ground: (x: number, z: number) => number): TrackDesign | null {
+  const from = original.nodes[p.start - 1];
+  const to = d.nodes[d.nodes.length - 1];
+  if (!from || !to) return null;
+  if (Math.abs(from.dir[1] - to.dir[1]) > 0.05 || Math.abs(from.bank - to.bank) > 0.05) return null;
+  const yaw = Math.atan2(to.dir[2], to.dir[0]) - Math.atan2(from.dir[2], from.dir[0]);
+  const c = Math.cos(yaw);
+  const sn = Math.sin(yaw);
+  // Rotation about the vertical axis that takes `from.dir` onto `to.dir` (x/z plane).
+  const rot = (x: number, z: number): [number, number] => [x * c - z * sn, x * sn + z * c];
+  const nodes: TrackNode[] = original.nodes.slice(p.start, p.end + 1).map((n) => {
+    const [x, z] = rot(n.p[0] - from.p[0], n.p[2] - from.p[2]);
+    const [dx, dz] = rot(n.dir[0], n.dir[2]);
+    return { ...n, p: [to.p[0] + x, to.p[1] + (n.p[1] - from.p[1]), to.p[2] + z], dir: [dx, n.dir[1], dz] };
+  });
+  const out: TrackDesign = { ...d, nodes: [...d.nodes, ...nodes] };
+  const start = d.nodes.length;
+  if (minClearance(out, start - 1, ground) < 0.8) return null;
+  const part = new BakedTrack({ ...out, closed: false, nodes: out.nodes.slice(start - 1) }, 0.5);
+  if (fastConflicts(baseInfo(opened(d)), part)) return null;
+  return out;
 }
 
 /** Clamp a parameter to the preset's allowed range. */
@@ -677,10 +713,10 @@ export function freshCoaster(base: TrackDesign, y0: number, ground: (x: number, 
       { id: 'st1', p: [20, y0, 0], dir: [1, 0, 0], bank: 0, kind: 'track', group: 'station' },
     ],
   };
-  d = addPiece(d, 'lift', ground).design;
-  d.nodes[2]!.group = 'start';
-  for (const n of d.nodes) if (n.group && n.group !== 'station') n.group = 'start';
-  d = addPiece(d, 'drop', ground).design;
-  for (const n of d.nodes) if (n.group && n.group !== 'station') n.group = 'start';
+  // Built as two ordinary pieces, so each can be tapped, changed or removed like any other.
+  for (const id of ['lift', 'drop'] as const) {
+    const p = planNext(d, { kind: 'special', id }, ground);
+    if (!p.blocked) d = p.design;
+  }
   return d;
 }

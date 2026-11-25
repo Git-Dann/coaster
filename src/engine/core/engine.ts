@@ -32,6 +32,8 @@ export type PickResult =
   | { type: 'height' }
   | { type: 'node'; id: string; index: number }
   | { type: 'track'; node: number }
+  /** The automatic return to the station (built for the player, not a piece of theirs). */
+  | { type: 'return' }
   | { type: 'ground'; point: V3 }
   | { type: 'none' };
 
@@ -720,14 +722,14 @@ export class Engine {
       if (this.project(e, this.scr) && this.scr.distanceTo({ x, y }) < HANDLE_PX) return { type: 'end' };
     }
     if (this.design && this.buildMode && this.track) {
-      // Edit mode: tap anywhere along the player's own track to select that piece.
+      // Edit mode: tap anywhere along the track. The player's own track selects that piece; the
+      // automatic return says what it is.
       const t = this.track;
       const userEnd = t.nodeS[this.design.nodes.length - 1] ?? 0;
       let bestS = -1;
       let bdist = 34;
       for (let i = 0; i < t.count; i += 4) {
         const s = i * t.ds;
-        if (s > userEnd) break;
         if (!this.project([t.pos[i * 3]!, t.pos[i * 3 + 1]!, t.pos[i * 3 + 2]!], this.scr)) continue;
         const dd = this.scr.distanceTo({ x, y });
         if (dd < bdist) {
@@ -735,6 +737,7 @@ export class Engine {
           bestS = s;
         }
       }
+      if (bestS > userEnd + 0.5) return { type: 'return' };
       if (bestS >= 0) {
         let seg = 0;
         while (seg + 1 < t.nodeS.length && t.nodeS[seg + 1]! <= bestS) seg++;

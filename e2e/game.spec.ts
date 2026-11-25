@@ -233,14 +233,19 @@ test('carriages change at any time, even mid-ride; timber, rain and riding all w
   await page.getByRole('button', { name: 'Rain', exact: true }).click();
   await expect.poll(() => page.evaluate(() => (window as any).__cozy.engine.atmosphere.state.rain), { timeout: 15_000 }).toBeGreaterThan(0.3);
   await page.getByRole('button', { name: 'Ride', exact: true }).click();
-  await page.getByRole('button', { name: 'Ride!' }).click();
+  await page.getByRole('button', { name: 'Front seat' }).click();
   const cam = () => page.evaluate(() => (window as any).__cozy.store.getState().camera);
   expect(await cam()).toBe('front');
   // Riding puts the sheet away for a clear view; opening and closing it never ends the ride.
-  await expect(page.getByRole('button', { name: 'Ride!' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Front seat' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Ride', exact: true }).click();
   await page.getByRole('button', { name: 'Watch' }).click();
   expect(await cam()).not.toBe('orbit');
+  // Menus never change the view: opening Sky while watching keeps watching.
+  const watchingCam = await cam();
+  await page.getByRole('button', { name: 'Sky', exact: true }).click();
+  expect(await cam()).toBe(watchingCam);
+  await page.getByRole('button', { name: 'Sky', exact: true }).click();
   await page.getByRole('button', { name: 'Ride', exact: true }).click();
   await page.getByRole('button', { name: 'Ride', exact: true }).click();
   expect(await cam()).not.toBe('orbit');

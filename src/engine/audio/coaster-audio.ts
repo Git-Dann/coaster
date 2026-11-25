@@ -48,6 +48,9 @@ export class CoasterAudio {
   private readonly launchGain: SmoothParam;
   private readonly launchFreq: SmoothParam;
   private readonly liftGain: SmoothParam;
+  /** Chain clacks get their own, gentler distance roll-off: a lift is heard right across the park. */
+  private readonly clackOut: GainNode;
+  private readonly clackDistance: SmoothParam;
 
   private material: BuildMaterial = 'timber';
 
@@ -61,6 +64,9 @@ export class CoasterAudio {
     this.pan = new SmoothParam(this.panner.pan, SPATIAL_TC, 0);
     this.body = ctx.createGain();
     this.body.connect(this.out);
+    this.clackOut = ctx.createGain();
+    this.clackOut.connect(this.panner);
+    this.clackDistance = new SmoothParam(this.clackOut.gain, SPATIAL_TC, 0);
 
     // roll
     const roll = this.chain(noise.pink, 'lowpass', 200, 0.6);
@@ -160,6 +166,7 @@ export class CoasterAudio {
     const riding = s.riding;
 
     this.distanceGain.set(riding ? 1 : 1 / (1 + Math.max(0, s.distance) / 15), now);
+    this.clackDistance.set(riding ? 1 : 1 / (1 + Math.max(0, s.distance) / 45), now);
     this.pan.set(riding ? 0 : clamp(s.pan, -1, 1), now);
 
     const station = s.inStation ? 0.7 : 1;
@@ -186,14 +193,17 @@ export class CoasterAudio {
     this.liftGain.set(s.liftEngaged ? 0.07 : 0, now);
   }
 
-  /** Chain-dog click: two quick micro-transients with a tiny pitched body, through the train's spatial chain. */
+  /**
+   * Chain-dog clack: a short click from the dog dropping into the next tooth, then a small wooden or
+   * metal knock. Kept below ~2 kHz and soft-edged so it ticks along under the music, not over it.
+   */
   clack(): number {
     const t = this.ctx.currentTime + 0.003;
     const steel = this.material === 'steel';
-    const f = vary(steel ? 2400 : 1700, 0.06);
-    playNoise(this.ctx, this.body, { buffer: this.noise.white, at: t, gain: 0.16, decay: 0.006, freq: f, q: 2 });
-    playNoise(this.ctx, this.body, { buffer: this.noise.white, at: t + vary(0.022, 0.15), gain: 0.1, decay: 0.008, freq: f * 0.8, q: 2 });
-    return playTone(this.ctx, this.body, { at: t, freq: vary(steel ? 820 : 520, 0.05), gain: 0.05, decay: 0.035, attack: 0.001, type: 'triangle', lowpass: 2000 });
+    const f = vary(steel ? 1700 : 1250, 0.06);
+    playNoise(this.ctx, this.clackOut, { buffer: this.noise.white, at: t, gain: 0.2, decay: 0.012, freq: f, q: 1.6 });
+    playNoise(this.ctx, this.clackOut, { buffer: this.noise.white, at: t + vary(0.03, 0.15), gain: 0.08, decay: 0.01, freq: f * 0.75, q: 1.6 });
+    return playTone(this.ctx, this.clackOut, { at: t, freq: vary(steel ? 520 : 300, 0.05), gain: 0.11, decay: 0.06, attack: 0.001, type: 'triangle', lowpass: 1600 });
   }
 
   dispose(): void {

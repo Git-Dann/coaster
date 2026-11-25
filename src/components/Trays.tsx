@@ -190,7 +190,7 @@ export function BuildTray() {
             <button type="button" className="cc-pill-btn" onClick={() => (ui('tap'), removeSelected())} aria-label="Remove this piece">
               <Icon name="trash" size={20} /> <span>Remove piece</span>
             </button>
-            <button type="button" className="cc-add-btn" onClick={() => (ui('success'), addGhost())} aria-label="Apply change" disabled={!ghost?.changed || !!ghost?.blocked}>
+            <button type="button" className="cc-add-btn" onClick={() => addGhost()} aria-label="Apply change" disabled={!ghost?.changed || !!ghost?.blocked}>
               <Icon name="check" size={22} /> <span>Apply</span>
             </button>
           </>
@@ -199,7 +199,7 @@ export function BuildTray() {
             <button type="button" className="cc-pill-btn" onClick={() => (ui('tap'), removeLast())} aria-label="Remove the last piece">
               <Icon name="trash" size={20} /> <span>Remove</span>
             </button>
-            <button type="button" className="cc-add-btn" onClick={() => (ui('success'), addGhost())} aria-label="Add piece" disabled={!ghost || !!ghost.blocked}>
+            <button type="button" className="cc-add-btn" onClick={() => addGhost()} aria-label="Add piece" disabled={!ghost || !!ghost.blocked}>
               <Icon name="plus" size={22} /> <span>Add piece</span>
             </button>
           </>
@@ -471,15 +471,18 @@ export function SkyTray() {
 // The wide view first: it never starts inside the station building.
 const WATCH: CameraMode[] = ['cinematic', 'follow', 'side', 'trackside'];
 
+const WATCH_NAMES: Partial<Record<CameraMode, string>> = { cinematic: 'Cinematic', follow: 'Follow', side: 'Side on', trackside: 'Trackside' };
+
 export function RideTray() {
   const camera = useGame((s) => s.camera);
   const playback = useGame((s) => s.playback);
   const watching = WATCH.includes(camera);
   return (
     <Tray label="Ride">
-      <Row label="Ride">
+      <p className="cc-tray-heading">Ride along</p>
+      <Row label="Ride along">
         <Card
-          label="Ride!"
+          label="Front seat"
           icon="play"
           accent
           on={camera === 'front'}
@@ -491,22 +494,36 @@ export function RideTray() {
           }}
         />
         <Card
-          label="Watch"
+          label="Back seat"
+          icon="train"
+          on={camera === 'rear'}
+          onClick={() => {
+            ui('select');
+            useGame.setState({ camera: 'rear', panel: 'none' });
+            services.engine?.dispatch();
+          }}
+        />
+        <Card
+          label={watching ? `Watch: ${WATCH_NAMES[camera]}` : 'Watch'}
           icon="eye"
           on={watching}
           onClick={() => {
             ui('select');
+            // Tapping again moves to the next watching spot.
             const next = WATCH[(WATCH.indexOf(camera) + 1) % WATCH.length]!;
             useGame.setState({ camera: next, panel: 'none' });
           }}
         />
-        <Card label="Back seat" icon="train" on={camera === 'rear'} onClick={() => (ui('select'), useGame.setState({ camera: 'rear', panel: 'none' }))} />
-        <Card label="Overview" icon="frame" on={camera === 'orbit'} onClick={() => (ui('select'), useGame.setState({ camera: 'orbit' }), services.engine?.frameCoaster())} />
-        <Card label="To station" icon="reset" onClick={() => (ui('tap'), services.engine?.resetTrain())} />
+      </Row>
+      <p className="cc-tray-heading">View and more</p>
+      <Row label="View and more">
+        <Card label="Builder view" icon="frame" on={camera === 'orbit'} onClick={() => (ui('select'), useGame.setState({ camera: 'orbit' }), services.engine?.frameCoaster())} />
+        <Card label="Train to station" icon="reset" onClick={() => (ui('tap'), services.engine?.resetTrain())} />
         <Card label="Relax" icon="leaf" onClick={() => (ui('open'), useGame.setState({ overlay: 'relax', panel: 'none', camera: 'relax' }))} />
         <Card label="Photo" icon="camera" onClick={() => (ui('open'), useGame.setState({ overlay: 'photo', panel: 'none' }))} />
       </Row>
       <div className="cc-tray-actions">
+        <span className="cc-tray-heading inline">Speed</span>
         <div className="cc-pill-pair" role="group" aria-label="Speed">
           {[0.5, 1, 2].map((v) => (
             <button key={v} type="button" className={playback === v ? 'on' : ''} aria-pressed={playback === v} onClick={() => (ui('select'), useGame.setState({ playback: v }))}>

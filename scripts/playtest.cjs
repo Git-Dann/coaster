@@ -192,14 +192,14 @@ async function run(devName, devOpts) {
 
   // Ride
   await step('ride tab', () => btn('Ride').click());
-  await step('ride!', () => btn('Ride!').click(), 3500);
+  await step('ride!', () => btn('Front seat').click(), 3500);
   await step('reopen ride sheet', () => btn('Ride').click());
-  await step('watch', () => btn('Watch').click(), 3000);
-  await step('reopen + watch again', async () => { await btn('Ride').click(); await btn('Watch').click(); }, 3000);
+  await step('watch', () => btn(/^Watch/, false).click(), 3000);
+  await step('reopen + watch again', async () => { await btn('Ride').click(); await btn(/^Watch/, false).click(); }, 3000);
   await step('back seat', async () => { await btn('Ride').click(); await btn('Back seat').click(); }, 3000);
   await step('fast speed', async () => { await btn('Ride').click(); await btn('Fast').click(); }, 1500);
-  await step('overview', () => btn('Overview').click(), 1500);
-  await step('to station', () => btn('To station').click(), 1500);
+  await step('overview', () => btn('Builder view').click(), 1500);
+  await step('to station', () => btn('Train to station').click(), 1500);
   await step('relax', () => btn('Relax').click(), 2500);
   await step('leave relax', async () => { await page.mouse.click(10, 300); const b = page.getByRole('button', { name: /back|done|stop|leave|exit/i }).first(); if (await b.isVisible().catch(() => false)) await b.click(); }, 1500);
   await step('photo', async () => { await btn('Ride').click().catch(() => {}); await btn('Photo').click(); }, 1500);
@@ -221,7 +221,7 @@ async function run(devName, devOpts) {
     await step(`fresh add ${p}`, async () => { await btn(p).click(); await btn('Add piece').click(); }, 900);
   }
   await step('fresh overview', async () => { await page.evaluate(() => window.__cozy.engine.frameCoaster()); }, 1500);
-  await step('fresh ride', async () => { await btn('Ride').click(); await btn('Ride!').click(); }, 4000);
+  await step('fresh ride', async () => { await btn('Ride').click(); await btn('Front seat').click(); }, 4000);
   await browser.close();
 }
 

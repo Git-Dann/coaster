@@ -61,7 +61,7 @@ function buildCar(style: CarStyle, mats: Mats, lead: boolean): { group: THREE.Gr
   parts.push(rbox(wall * 2, sh.bodyH * (lead ? 1.1 : 0.9), sh.bodyW, sh.radius, L / 2 - wall, baseY + sh.bodyH * (lead ? 0.55 : 0.45), 0));
   if (lead) {
     // A low, raked front panel (no dome): leans forward from the front wall like a real lead car.
-    const front = rbox(0.14, sh.bodyH * 1.05, sh.bodyW, 0.035, 0, 0, 0).rotateZ(-0.3).translate(L / 2 + 0.02, baseY + sh.bodyH * 0.5, 0);
+    const front = rbox(0.14, sh.bodyH * 0.85, sh.bodyW, 0.035, 0, 0, 0).rotateZ(-0.3).translate(L / 2 + 0.02, baseY + sh.bodyH * 0.42, 0);
     parts.push(front);
   }
   const body = new THREE.Mesh(merge(parts), mats.primary);

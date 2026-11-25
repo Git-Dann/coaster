@@ -1430,3 +1430,17 @@
   color: var(--forest, #55745b);
   font-weight: var(--fw-bold);
 }
+
+/* Small section headings inside a sheet (Ride: "Ride along", "View and more", "Speed"). */
+.cc-tray-heading {
+  margin: 2px 0 -2px;
+  padding: 0 18px;
+  font-size: 0.74rem;
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.02em;
+  color: var(--ink-soft, #6b6257);
+}
+.cc-tray-heading.inline {
+  margin: 0;
+  padding: 0 4px 0 6px;
+}

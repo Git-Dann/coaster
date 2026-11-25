@@ -198,12 +198,13 @@ export type PieceSound = 'ratchet' | 'whoosh' | 'loop' | 'hiss' | 'launch' | 'tr
  */
 export const PIECE_RECIPES: Readonly<Record<PieceSound, RecipeEntry>> = {
   ratchet: {
-    dur: 0.55,
+    dur: 0.95,
     play: (ctx, n, out, t) => {
-      for (let i = 0; i < 5; i++) {
-        const at = t + i * vary(0.095, 0.08);
-        touch(ctx, n, out, at, 1900, 0.05, 0.006);
-        woodBody(ctx, out, at, vary(260, 0.05), 0.07, 0.035);
+      // Clack-clack-clack of a chain lift, slowing a touch as if the train were climbing.
+      for (let i = 0; i < 7; i++) {
+        const at = t + i * 0.105 + i * i * 0.004 + vary(0.004, 0.5);
+        touch(ctx, n, out, at, 1400, 0.11, 0.01);
+        woodBody(ctx, out, at, vary(300, 0.04), 0.14, 0.05);
       }
     },
   },
