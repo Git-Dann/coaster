@@ -320,8 +320,12 @@ export class Engine {
   }
 
   /** Show a translucent preview of proposed track (or clear it). Committed geometry is untouched. */
+  /** The end of the piece the edit view is showing (new or selected), for checks and tests. */
+  previewFocus: V3 | null = null;
+
   setPreview(design: TrackDesign | null, range?: { fromNode: number; toNode: number }): void {
     this.previewDesign = design;
+    if (!design) this.previewFocus = null;
     if (!design || design.nodes.length < 2) {
       this.previewTrack = null;
       this.previewRenderer.update(null, 'tubular');

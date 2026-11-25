@@ -75,7 +75,7 @@ async function audit(page, ctx) {
       const st = window.__cozy.store.getState();
       if (st.panel === 'build' && st.camera === 'orbit') {
         const pd = e.previewDesign;
-        const end = (pd ?? st.design).nodes[(pd ?? st.design).nodes.length - 1].p;
+        const end = e.previewFocus ?? (pd ?? st.design).nodes[(pd ?? st.design).nodes.length - 1].p;
         const v = new (e.rig.camera.position.constructor)(end[0], end[1], end[2]).project(e.rig.camera);
         const sx = (v.x + 1) / 2 * innerWidth, sy = (1 - v.y) / 2 * innerHeight;
         const top = document.querySelector('.cc-top')?.getBoundingClientRect().bottom ?? 0;
@@ -121,6 +121,22 @@ async function run(devName, devOpts) {
     await shot(name.replace(/[^a-z0-9]+/gi, '_'));
   };
   const btn = (name, exact = true) => page.getByRole('button', { name, exact }).first();
+  let hidden = 0;
+  const slopeBtn = (name) => page.getByRole('group', { name: 'Slope' }).getByRole('button', { name, exact: true });
+  // Is this option on offer right now? (Contextual building hides what doesn't fit.) Waits briefly
+  // for the panel to finish checking.
+  const offered = async (name, group) => {
+    await page.waitForFunction(() => window.__cozy.store.getState().avail !== null, null, { timeout: 15000 }).catch(() => {});
+    const loc = group ? slopeBtn(name) : btn(name);
+    return (await loc.count()) > 0 && (await loc.isVisible().catch(() => false));
+  };
+  // An offered option must be addable: Add enabled once its ghost is planned.
+  const addOffered = async () => {
+    await page.waitForFunction(() => { const s = window.__cozy.store.getState(); return s.ghost?.forChoice === JSON.stringify(s.buildChoice); }, null, { timeout: 20000 }).catch(() => {});
+    const add = btn('Add piece');
+    if (await add.isDisabled()) note(ctx, `offered option can't be added: ${await page.evaluate(() => window.__cozy.store.getState().ghost?.blocked)}`);
+    else await add.click();
+  };
   const fast = () => page.evaluate(() => window.__cozy.store.getState().setSettings((s) => ({ ...s, graphics: { ...s.graphics, tier: 'battery', postProcessing: false } })));
 
   await page.goto(URL);
@@ -137,15 +153,19 @@ async function run(devName, devOpts) {
 
   // Build (edit mode): every direction/slope combination and every special piece, each added.
   await step('build tab', () => btn('Edit').click(), 1200);
+  // The panel only offers what fits here, so options that are hidden right now are skipped (and
+  // counted), never clicked. Add must then be enabled for every option that is offered.
   for (const dir of ['Straight', 'Turn left', 'Turn right']) {
     for (const slope of ['Level', 'Up', 'Down']) {
-      await step(`choose ${dir} ${slope}`, async () => { await btn(dir).click(); await btn(slope).click(); }, 700);
-      await step(`add ${dir} ${slope}`, () => btn('Add piece').click(), 900);
+      if (!(await offered(dir)) || !(await offered(slope, 'Slope'))) { hidden++; continue; }
+      await step(`choose ${dir} ${slope}`, async () => { await btn(dir).click(); if (await offered(slope, 'Slope')) await slopeBtn(slope).click(); }, 700);
+      await step(`add ${dir} ${slope}`, () => addOffered(), 900);
     }
   }
   for (const p of ['Hill', 'Lift', 'Drop', 'Loop', 'Roll', 'Corkscrew', 'Spiral', 'Brakes', 'Launch']) {
+    if (!(await offered(p))) { hidden++; continue; }
     await step(`choose ${p}`, () => btn(p).click(), 900);
-    await step(`add ${p}`, () => btn('Add piece').click(), 1000);
+    await step(`add ${p}`, () => addOffered(), 1000);
   }
   // Edit existing pieces: step back, change one, remove one, back to the end.
   await step('select previous piece', async () => { await btn('Previous piece').click(); await btn('Previous piece').click(); }, 1200);
@@ -222,10 +242,12 @@ async function run(devName, devOpts) {
   // Build again on a fresh coaster: a quick kid-style session.
   await step('build tab 2', async () => { if (!(await btn('Add piece').isVisible().catch(() => false))) await btn('Edit').click(); });
   for (const p of ['Turn left', 'Hill', 'Loop', 'Turn right', 'Spiral', 'Turn left', 'Drop', 'Straight']) {
-    await step(`fresh add ${p}`, async () => { await btn(p).click(); await btn('Add piece').click(); }, 900);
+    if (!(await offered(p))) { hidden++; continue; }
+    await step(`fresh add ${p}`, async () => { await btn(p).click(); await addOffered(); }, 900);
   }
   await step('fresh overview', async () => { await page.evaluate(() => window.__cozy.engine.frameCoaster()); }, 1500);
   await step('fresh ride', async () => { await btn('Ride').click(); await btn('Front seat').click(); }, 4000);
+  console.log(`[${devName}] ${hidden} options were hidden (didn't fit) and skipped`);
   await browser.close();
 }
 
