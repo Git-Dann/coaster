@@ -103,7 +103,9 @@ body,
   margin: 0;
   height: 100%;
   overflow: hidden;
-  background: #dde6e8;
+  /* Matches the scene's horizon (updated at runtime), so any strip the browser shows around the
+     page blends into the sky instead of showing a flat band. */
+  background: var(--scene-bg, #dde6e8);
   color: var(--ink);
   font-family: var(--font);
   font-weight: var(--fw-regular);

@@ -1,5 +1,6 @@
 import type { V3 } from '../core/vec3';
 import { autoBank } from './elements';
+import { separateCrossings } from './clearance';
 import type { TrackDesign, TrackNode } from './types';
 
 /**
@@ -131,6 +132,9 @@ export function returnNodes(design: TrackDesign, opt: ReturnOptions): TrackNode[
   let travelled = 0;
   const step = 7;
   const bankMag = Math.abs(autoBank(90, R, opt.speed)) * (Math.PI / 180);
+  // After rolls the last bank can be a whole number of turns: keep the return on the same winding
+  // so it never unwinds those turns as a real twist.
+  const wind = Math.round((last.bank - first.bank) / (2 * Math.PI)) * 2 * Math.PI;
   for (let si = 0; si < segs.length; si++) {
     const sg = segs[si]!;
     const n = Math.max(1, Math.ceil(sg.len / step));
@@ -158,7 +162,7 @@ export function returnNodes(design: TrackDesign, opt: ReturnOptions): TrackNode[
       let y = y0 + (y1 - y0) * ease + slopeCarry;
       y = Math.max(y, opt.groundAt(x, z) + 1.1);
       const nextKind = segs[si]!.kind;
-      const bank = nextKind === 'S' ? 0 : (nextKind === 'L' ? -1 : 1) * bankMag * Math.min(1, Math.sin(Math.PI * Math.min(1, (k + 1) / n)) * 3);
+      const bank = wind + first.bank + (nextKind === 'S' ? 0 : (nextKind === 'L' ? -1 : 1) * bankMag * Math.min(1, Math.sin(Math.PI * Math.min(1, (k + 1) / n)) * 3));
       out.push({ id: `ret_${si}_${k}`, p: [x, y, z], dir: [Math.cos(h), 0, -Math.sin(h)], bank, kind: 'track', group: 'return' });
     }
   }
@@ -175,9 +179,13 @@ export function returnNodes(design: TrackDesign, opt: ReturnOptions): TrackNode[
   // The path ends exactly at the start of the brake run: make that node the brake run, level with
   // the platform and lined up with it (replacing it rather than adding a coincident node).
   const end = out[out.length - 1];
-  const brakeNode: TrackNode = { id: 'ret_brake', p: [goal.x, y1, goal.z], dir: [fdir[0]!, 0, fdir[2]!], bank: first.bank, kind: 'brake', param: 2.4, group: 'return' };
+  const brakeNode: TrackNode = { id: 'ret_brake', p: [goal.x, y1, goal.z], dir: [fdir[0]!, 0, fdir[2]!], bank: first.bank + wind, kind: 'brake', param: 2.4, group: 'return' };
   if (end && Math.hypot(end.p[0] - goal.x, end.p[2] - goal.z) < 2.5) out[out.length - 1] = brakeNode;
   else out.push(brakeNode);
+  // The return must never pass through the player's track: lift it over (or under) crossings.
+  // The final brake run into the station stays level.
+  const temp: TrackDesign = { ...design, nodes: [...design.nodes.map((n) => ({ ...n, p: [...n.p] as V3, dir: [...n.dir] as V3 })), ...out], closed: true };
+  separateCrossings(temp, design.nodes.length, opt.groundAt, 2);
   // A trim brake halfway round keeps very fast layouts from arriving too quickly.
   const mid = out[Math.floor(out.length * 0.6)];
   if (mid && mid !== out[out.length - 1]) {

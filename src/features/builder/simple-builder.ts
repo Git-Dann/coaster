@@ -2,6 +2,7 @@ import type { V3 } from '../../engine/core/vec3';
 import { BakedTrack } from '../../engine/track/bake';
 import { appendElement, cloneDesign, liftAboveGround, removeLastPiece, uprightBankAtEnd } from '../../engine/track/design-ops';
 import type { TrackDesign } from '../../engine/track/types';
+import { MIN_VERTICAL, findClashes, separateCrossings } from '../../engine/track/clearance';
 import { estimateSpeedAtEnd, presetById, type PresetId } from './builder';
 
 /**
@@ -54,7 +55,15 @@ let serial = 0;
 const newGroup = () => `g${Date.now().toString(36)}${(serial++).toString(36)}`;
 
 /** Build `design` + piece from the node before `start`. Never alters nodes before the piece. */
-function generate(base: TrackDesign, piece: KidPiece, params: Record<string, number>, group: string, ground: (x: number, z: number) => number): TrackDesign {
+function generate(base: TrackDesign, piece: KidPiece, rawParams: Record<string, number>, group: string, ground: (x: number, z: number) => number): TrackDesign {
+  const params = { ...rawParams };
+  if (piece.id === 'helix') {
+    // Each full turn must clear the one below it.
+    const turns = Math.abs(params.turns ?? 1);
+    const need = (MIN_VERTICAL + 0.6) * Math.max(1, turns);
+    const rise = params.rise ?? -need;
+    if (Math.abs(rise) < need) params.rise = (rise > 0 ? 1 : -1) * need;
+  }
   const d = cloneDesign(base);
   d.closed = false;
   const last = d.nodes[d.nodes.length - 1]!;
@@ -65,8 +74,39 @@ function generate(base: TrackDesign, piece: KidPiece, params: Record<string, num
   // The node the piece leaves from keeps its own kind if it is the station end; otherwise follow the piece.
   const next = appendElement(d, res, group);
   if (last.group === 'station' && base.nodes.length === 2) next.nodes[base.nodes.length - 1]!.kind = res.startKind;
-  return liftAboveGround(next, base.nodes.length, ground);
+  liftAboveGround(next, base.nodes.length, ground);
+  // New track never passes through existing track.
+  if (!COMPLEX.has(piece.id)) {
+    // Simple track is smoothly lifted over (or dropped under) crossings.
+    separateCrossings(next, base.nodes.length, ground);
+    return next;
+  }
+  // Loops, rolls, spirals and the like are never bent: if one would clash, a gentle ramp in front
+  // of it raises the whole element clear, keeping its shape exact (ramp and element are one piece).
+  let result = next;
+  let extra = 0;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const { conflicts } = findClashes(result, base.nodes.length, ground);
+    if (conflicts.length === 0) return result;
+    extra += Math.max(MIN_VERTICAL + 0.5, ...conflicts.map((c) => Math.abs(c.lift))) + 0.5;
+    const rise = Math.min(30, extra);
+    const ramp = presetById('track').make(
+      { p: [...last.p] as V3, dir: [...last.dir] as V3, bank: last.bank },
+      { length: Math.max(18, rise * 4), turn: 0, rise, bank: 0 },
+      ctx,
+    );
+    const withRamp = appendElement(d, ramp, group);
+    const rl = withRamp.nodes[withRamp.nodes.length - 1]!;
+    const res2 = preset.make({ p: [...rl.p] as V3, dir: [...rl.dir] as V3, bank: rl.bank }, { ...preset.defaults, ...params }, ctx);
+    result = liftAboveGround(appendElement(withRamp, res2, group), base.nodes.length, ground);
+  }
+  // Last resort: smooth only the simple parts.
+  separateCrossings(result, base.nodes.length, ground);
+  return result;
 }
+
+/** Elements whose shape must never be bent to clear other track. */
+const COMPLEX: ReadonlySet<PieceId> = new Set(['loop', 'roll', 'corkscrew', 'helix', 'lift', 'drop']);
 
 /** Open a closed (legacy) circuit so pieces can be added; the auto-return reconnects it. */
 export function opened(d: TrackDesign): TrackDesign {

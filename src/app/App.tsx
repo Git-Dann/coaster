@@ -59,8 +59,20 @@ export function App() {
     void boot();
     const ro = new ResizeObserver(() => services.engine?.resize());
     ro.observe(canvas);
+    // Keep the page and browser-bar colour in step with the sky (no per-frame work: every 2 s).
+    let lastBg = '';
+    const bgTimer = window.setInterval(() => {
+      const e = services.engine;
+      if (!e) return;
+      const hex = `#${e.atmosphere.fog.color.getHexString()}`;
+      if (hex === lastBg) return;
+      lastBg = hex;
+      document.documentElement.style.setProperty('--scene-bg', hex);
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', hex);
+    }, 2000);
     return () => {
       cancelled = true;
+      window.clearInterval(bgTimer);
       ro.disconnect();
       disposeStore();
       disposeSaves();

@@ -18,6 +18,7 @@ export function TopBar() {
   const canRedo = useGame((s) => s.future.length > 0);
   const name = useGame((s) => s.coasterName);
   const camera = useGame((s) => s.camera);
+  const muted = useGame((s) => s.settings.audio.muted);
   const g = useGame.getState;
   return (
     <header className="cc-top">
@@ -27,6 +28,15 @@ export function TopBar() {
       </div>
       <div className="cc-top-right">
         {camera !== 'orbit' && <IconButton icon="frame" label="Back to the overview" variant="solid" onClick={() => useGame.setState({ camera: 'orbit' })} />}
+        <IconButton
+          icon={muted ? 'mute' : 'speaker'}
+          label={muted ? 'Sound off: tap to turn it on' : 'Sound on: tap to mute'}
+          variant="solid"
+          onClick={() => {
+            void services.engine?.audio.unlock();
+            g().setSettings((x) => ({ ...x, audio: { ...x.audio, muted: !x.audio.muted, master: x.audio.master < 0.05 ? 0.8 : x.audio.master } }));
+          }}
+        />
         <div className="cc-pill-group" role="group" aria-label="Undo and redo">
           <IconButton icon="undo" label="Undo" shortcut="Ctrl+Z" disabled={!canUndo} onClick={() => (ui('undo'), g().undo())} />
           <IconButton icon="redo" label="Redo" shortcut="Ctrl+Shift+Z" disabled={!canRedo} onClick={() => (ui('redo'), g().redo())} />

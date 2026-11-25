@@ -4,10 +4,14 @@
   overflow: hidden;
 }
 .cc-canvas {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  /* The world fills the whole screen, including the space behind mobile browser bars (large
+     viewport); the controls stay within the visible area. */
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100lvh;
   display: block;
   touch-action: none;
   outline: none;

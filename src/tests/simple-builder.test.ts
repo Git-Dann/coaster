@@ -8,6 +8,30 @@ import { Heightfield, PAD_HEIGHT } from '../engine/terrain/heightfield';
 import { mulberry32 } from '../engine/terrain/noise';
 import { PIECES, addPiece, adjustPiece, freshCoaster, removePiece, type PieceId } from '../features/builder/simple-builder';
 import { cfg } from './physics/helpers';
+import { MIN_VERTICAL } from '../engine/track/clearance';
+
+/** Every pair of track points far apart along the circuit but close in plan must be vertically separated. */
+function worstClash(track: BakedTrack): { gap: number; s1: number; s2: number } {
+  let worst = { gap: Infinity, s1: 0, s2: 0 };
+  const step = 4; // 1 m
+  const idx: number[] = [];
+  for (let i = 0; i < track.count; i += step) idx.push(i);
+  for (let a = 0; a < idx.length; a++) {
+    for (let b = a + 1; b < idx.length; b++) {
+      const i = idx[a]!;
+      const j = idx[b]!;
+      let ds = Math.abs(i - j) * track.ds;
+      if (track.closed) ds = Math.min(ds, track.length - ds);
+      if (ds < 40) continue;
+      const dx = track.pos[i * 3]! - track.pos[j * 3]!;
+      const dz = track.pos[i * 3 + 2]! - track.pos[j * 3 + 2]!;
+      if (dx * dx + dz * dz > 2.5 * 2.5) continue;
+      const gap = Math.abs(track.pos[i * 3 + 1]! - track.pos[j * 3 + 1]!);
+      if (gap < worst.gap) worst = { gap, s1: i * track.ds, s2: j * track.ds };
+    }
+  }
+  return worst;
+}
 
 const hf = new Heightfield('meadow', 2026);
 const ground = (x: number, z: number) => hf.height(x, z);
@@ -49,6 +73,7 @@ describe('the track can never be left disconnected', () => {
     expect(track.diagnostics.maxGap).toBeLessThan(1e-9);
     expect(track.diagnostics.seamFlip).toBe(false);
     expect(1 / track.diagnostics.maxCurvature).toBeGreaterThan(3);
+    expect(worstClash(track).gap).toBeGreaterThanOrEqual(MIN_VERTICAL - 0.6);
     const sim = new TrainSim(track, cfg(6), { ...DEFAULT_PHYSICS });
     let arrivals = 0;
     for (let i = 0; i < 120 * 200; i++) {
@@ -83,6 +108,13 @@ describe('the track can never be left disconnected', () => {
       expect(track.diagnostics.maxGap).toBeLessThan(1e-6);
       expect(track.diagnostics.seamFlip, `trial ${trial}`).toBe(false);
       for (let i = 0; i < track.pos.length; i++) expect(Number.isFinite(track.pos[i]!)).toBe(true);
+      // No two parts of the coaster may ever share the same space.
+      const clash = worstClash(track);
+      expect(clash.gap, `trial ${trial} clash at ${clash.s1.toFixed(0)}/${clash.s2.toFixed(0)} m`).toBeGreaterThanOrEqual(MIN_VERTICAL - 0.6);
+      // Banking never spins faster than a roll element (no hidden unwinding twists between pieces).
+      let twist = 0;
+      for (let i = 1; i < track.count; i++) twist = Math.max(twist, Math.abs(track.bank[i]! - track.bank[i - 1]!) / track.ds);
+      expect(twist, `trial ${trial} twist rate`).toBeLessThan(0.6);
       // The train always behaves: it may stall on a layout without enough energy, but never errors.
       const sim = new TrainSim(track, cfg(4), { ...DEFAULT_PHYSICS });
       sim.dispatch();

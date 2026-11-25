@@ -125,7 +125,10 @@ export function piece(c: Cursor, pp: PieceParams): ElementResult {
     zs[i] = zs[i - 1]! - (Math.sin(hd) * Lh) / N;
   }
   const b0 = c.bank;
-  const bT = pp.bank * DEG;
+  // Bank targets are absolute angles: pick the equivalent nearest the start so a piece after a roll
+  // never unwinds whole turns.
+  let bT = pp.bank * DEG;
+  bT += Math.round((b0 - bT) / (2 * Math.PI)) * 2 * Math.PI;
   const nodes: ElementNode[] = [];
   for (let k = 1; k <= steps; k++) {
     const f = k / steps;
@@ -256,7 +259,7 @@ export function hill(c: Cursor, height: number, length: number): ElementResult {
  * Teardrop vertical loop. Curvature grows towards the top (clothoid-like), which keeps
  * vertical G-forces more even than a circle. Exits offset to the right to clear the entry.
  */
-export function verticalLoop(c: Cursor, height: number, lateral = 3): ElementResult {
+export function verticalLoop(c: Cursor, height: number, lateral = 3.6): ElementResult {
   const fr = frame(c);
   // Integrate a curve whose direction angle φ goes 0 → 2π with κ(φ) = k0 + (k1 − k0)·sin²(φ/2).
   const k0 = 1;
