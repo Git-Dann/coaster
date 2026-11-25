@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { BIOME_CONFIG } from '../terrain/heightfield';
 import { FixedStepLoop } from './fixed-step';
 import type { V3 } from './vec3';
 import { BakedTrack, newSample } from '../track/bake';
@@ -277,39 +278,33 @@ export class Engine {
   }
 
   /**
-   * The colour of the bottom edge of the picture, as '#rrggbb'. Phone browsers show the page
+   * The colour at the bottom edge of the picture, as '#rrggbb'. Phone browsers show the page
    * background under their floating toolbars; matching it to the scene there avoids a flat band.
-   * Sampled on request (one pixel row, straight after a frame is drawn), never every frame.
+   * Worked out from the scene (the ground under the bottom of the view, its grass colour and the
+   * haze at that distance), never read back from the screen: reading pixels makes the graphics
+   * chip finish all its work first, which was a visible hitch every time it ran.
    */
   bottomEdgeColour: string | null = null;
-  private edgeSampleWanted = false;
-  private readonly edgePixels = new Uint8Array(4 * 5);
+  private readonly edgeCol = new THREE.Color();
+  private readonly edgeFog = new THREE.Color();
   requestEdgeSample(): void {
-    this.edgeSampleWanted = true;
-  }
-  private sampleBottomEdge(): void {
-    this.edgeSampleWanted = false;
-    const gl = this.renderer.getContext();
-    const w = gl.drawingBufferWidth;
-    if (w < 10 || this.contextLost) return;
-    try {
-      // Five pixels across the bottom row (GL's origin is the bottom-left corner), averaged.
-      let r = 0;
-      let g = 0;
-      let b = 0;
-      for (let i = 0; i < 5; i++) {
-        gl.readPixels(Math.floor(((i + 0.5) / 5) * w), 1, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, this.edgePixels.subarray(i * 4, i * 4 + 4));
-        r += this.edgePixels[i * 4]!;
-        g += this.edgePixels[i * 4 + 1]!;
-        b += this.edgePixels[i * 4 + 2]!;
-      }
-      // A blank read (a browser that has already presented the frame) would give black: keep the old colour.
-      if (r + g + b < 5 * 30) return;
-      const hex = (v: number) => Math.round(v / 5).toString(16).padStart(2, '0');
-      this.bottomEdgeColour = `#${hex(r)}${hex(g)}${hex(b)}`;
-    } catch {
-      /* reading pixels is a nicety: ignore any failure */
+    const w = this.canvas.clientWidth;
+    const h = this.canvas.clientHeight;
+    if (w < 10 || h < 10) return;
+    const fog = this.atmosphere.fog;
+    const g = this.groundPoint(w / 2, h - 2);
+    if (!g) {
+      this.bottomEdgeColour = `#${fog.color.getHexString()}`;
+      return;
     }
+    const cfg = BIOME_CONFIG[this.terrain.biome];
+    this.edgeCol.setRGB(...cfg.grassLow, THREE.SRGBColorSpace).lerp(this.edgeFog.setRGB(...cfg.grassHigh, THREE.SRGBColorSpace), 0.5);
+    // Lit a little darker than the raw grass colour, then hazed by distance like the fog does.
+    this.edgeCol.multiplyScalar(0.9);
+    const d = this.rig.camera.position.distanceTo(this.tmp.set(g[0], g[1], g[2]));
+    const haze = 1 - Math.exp(-((fog.density * d) ** 2));
+    this.edgeCol.lerp(fog.color, Math.min(1, Math.max(0, haze)));
+    this.bottomEdgeColour = `#${this.edgeCol.getHexString()}`;
   }
 
   resize(): void {
@@ -1065,7 +1060,6 @@ export class Engine {
     this.updateAudio(dt, supportsMoving);
 
     this.painterly.render(this.renderer, this.scene, cam, this.elapsed, this.atmosphere.horizon, Math.max(this.terrain.drawDistance, 650, viewDist));
-    if (this.edgeSampleWanted) this.sampleBottomEdge();
 
     // Performance bookkeeping.
     this.cpuMs = performance.now() - t0;
