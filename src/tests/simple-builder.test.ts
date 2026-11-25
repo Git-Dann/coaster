@@ -150,6 +150,41 @@ describe('tap-to-add building', () => {
     expect(d.nodes[0]!.kind).toBe('station');
   });
 
+  test('the height lever makes gentle ramps, never spikes or holes', () => {
+    const d0 = starterPlayable(PAD_HEIGHT + 1);
+    const r = addPiece(d0, 'straight', ground);
+    for (const rise of [-30, -10, 10, 30]) {
+      const a = adjustPiece(r.design, r.active, { rise }, ground)!;
+      const nodes = a.design.nodes.slice(r.active.start - 1);
+      const t = new BakedTrack({ ...a.design, nodes, closed: false });
+      for (let i = 0; i < t.count; i++) expect(Math.abs(t.tan[i * 3 + 1]!), `rise ${rise}`).toBeLessThan(Math.sin((32 * Math.PI) / 180));
+      for (const n of nodes) expect(n.p[1]).toBeGreaterThanOrEqual(ground(n.p[0], n.p[2]) + 1.0);
+      // The lever shows the height the track really reached.
+      const end = nodes[nodes.length - 1]!.p[1];
+      expect(Math.abs(end - nodes[0]!.p[1] - a.active.params.rise!)).toBeLessThan(1.5);
+    }
+  });
+
+  test('the automatic return never spikes, whatever the lever and speed', () => {
+    const r = addPiece(starterPlayable(PAD_HEIGHT + 1), 'straight', ground);
+    for (let rise = -30; rise <= 30; rise += 3) {
+      const a = adjustPiece(r.design, r.active, { rise }, ground)!;
+      const top = Math.max(...a.design.nodes.map((n) => n.p[1]));
+      for (const speed of [8, 12, 16, 20, 24]) {
+        const c = withReturn(a.design, { groundAt: ground, speed });
+        const t = new BakedTrack(c);
+        let maxY = -Infinity;
+        for (let i = 0; i < t.count; i++) maxY = Math.max(maxY, t.pos[i * 3 + 1]!);
+        expect(maxY, `rise ${rise} speed ${speed}`).toBeLessThan(top + MIN_VERTICAL + 3);
+        for (let i = 1; i < c.nodes.length; i++) {
+          const p0 = c.nodes[i - 1]!.p;
+          const p1 = c.nodes[i]!.p;
+          expect(Math.hypot(p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]), `rise ${rise} speed ${speed} node ${i}`).toBeGreaterThan(0.75);
+        }
+      }
+    }
+  }, 60_000);
+
   test('pieces never go underground', () => {
     let d = starterPlayable(PAD_HEIGHT + 1);
     for (let i = 0; i < 4; i++) d = addPiece(d, 'down', ground).design;

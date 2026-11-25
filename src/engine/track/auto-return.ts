@@ -182,6 +182,16 @@ export function returnNodes(design: TrackDesign, opt: ReturnOptions): TrackNode[
   const brakeNode: TrackNode = { id: 'ret_brake', p: [goal.x, y1, goal.z], dir: [fdir[0]!, 0, fdir[2]!], bank: first.bank + wind, kind: 'brake', param: 2.4, group: 'return' };
   if (end && Math.hypot(end.p[0] - goal.x, end.p[2] - goal.z) < 2.5) out[out.length - 1] = brakeNode;
   else out.push(brakeNode);
+  // A Dubins path can end with a sliver of a segment, leaving two nodes almost on top of each
+  // other. A curve between near-coincident nodes with different directions loops wildly, so drop
+  // any node that crowds its successor (the brake node always stays).
+  for (let i = out.length - 2; i >= 0; i--) {
+    const a = out[i]!.p;
+    const b = out[i + 1]!.p;
+    if (Math.hypot(a[0] - b[0], a[2] - b[2]) < 3) out.splice(i, 1);
+  }
+  // The same applies to the join with the player's last node.
+  while (out.length > 1 && Math.hypot(out[0]!.p[0] - last.p[0], out[0]!.p[2] - last.p[2]) < 3) out.shift();
   // The return must never pass through the player's track: lift it over (or under) crossings.
   // The final brake run into the station stays level.
   const temp: TrackDesign = { ...design, nodes: [...design.nodes.map((n) => ({ ...n, p: [...n.p] as V3, dir: [...n.dir] as V3 })), ...out], closed: true };

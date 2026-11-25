@@ -260,10 +260,13 @@ export function generateSupports(
           local = [];
           mi = 0;
           primary = true;
-          const offsets = wide
-            ? [-(1.25 + height * 0.09), -0.72, 0.72, 1.25 + height * 0.09]
-            : [-0.9, 0.9];
-          const topOffsets = wide ? [-1.25, -0.72, 0.72, 1.25] : [-0.9, 0.9];
+          // Outer battered posts grow out of the inner pair as the bent gets taller, so bents change
+          // size smoothly along the track instead of jumping from two posts to four.
+          const spread = Math.max(0, height - 6);
+          const outB = 0.9 + spread * 0.15;
+          const outT = 0.9 + Math.min(0.4, spread * 0.08);
+          const offsets = wide ? [-outB, -0.9, 0.9, outB] : [-0.9, 0.9];
+          const topOffsets = wide ? [-outT, -0.9, 0.9, outT] : [-0.9, 0.9];
           const posts: P3[] = offsets.map((o) => {
             const x = ax + rx * o;
             const z = az + rz * o;
@@ -333,7 +336,8 @@ export function generateSupports(
         const r = 0.16 + Math.min(0.14, height * 0.006);
         if (height > 14) {
           // A-frame for tall supports.
-          const splay = height * 0.13;
+          // The legs open out gradually from the single column as supports get taller.
+          const splay = Math.min(height * 0.13, (height - 14) * 0.4);
           const legs: Array<[number, number, number]> = [-1, 1].map((sgn) => [
             ax + rx * splay * sgn,
             ground(ax + rx * splay * sgn, az + rz * splay * sgn),

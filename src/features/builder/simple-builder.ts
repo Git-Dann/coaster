@@ -55,8 +55,25 @@ let serial = 0;
 const newGroup = () => `g${Date.now().toString(36)}${(serial++).toString(36)}`;
 
 /** Build `design` + piece from the node before `start`. Never alters nodes before the piece. */
-function generate(base: TrackDesign, piece: KidPiece, rawParams: Record<string, number>, group: string, ground: (x: number, z: number) => number): TrackDesign {
+/** Steepest gentle climb or descent for plain track pieces (about 19° on average, under 30° at the steepest point): taller rises get longer. */
+const MAX_GRADE = 0.35;
+
+function generate(base: TrackDesign, piece: KidPiece, rawParams: Record<string, number>, group: string, ground: (x: number, z: number) => number): { design: TrackDesign; params: Record<string, number> } {
   const params = { ...rawParams };
+  const shown = { ...rawParams };
+  if (piece.preset === 'track') {
+    // Going down can never go below the ground: limit the drop to what fits, and report it back
+    // so the lever shows where the track really is.
+    const start = base.nodes[base.nodes.length - 1]!;
+    const run = Math.max(params.length ?? 20, Math.abs(params.rise ?? 0) / MAX_GRADE);
+    const h = Math.atan2(-start.dir[2], start.dir[0]);
+    const ex = start.p[0] + Math.cos(h) * run;
+    const ez = start.p[2] - Math.sin(h) * run;
+    const floor = Math.max(ground(ex, ez), ground(start.p[0], start.p[2])) + 1.4 - start.p[1];
+    if ((params.rise ?? 0) < floor) params.rise = shown.rise = Math.min(0, Math.round(floor * 2) / 2);
+    // Steep requests become longer, gentler ramps instead of spikes.
+    params.length = Math.max(params.length ?? 20, Math.abs(params.rise ?? 0) / MAX_GRADE);
+  }
   if (piece.id === 'helix') {
     // Each full turn must clear the one below it.
     const turns = Math.abs(params.turns ?? 1);
@@ -79,7 +96,7 @@ function generate(base: TrackDesign, piece: KidPiece, rawParams: Record<string, 
   if (!COMPLEX.has(piece.id)) {
     // Simple track is smoothly lifted over (or dropped under) crossings.
     separateCrossings(next, base.nodes.length, ground);
-    return next;
+    return { design: next, params: shown };
   }
   // Loops, rolls, spirals and the like are never bent: if one would clash, a gentle ramp in front
   // of it raises the whole element clear, keeping its shape exact (ramp and element are one piece).
@@ -87,7 +104,7 @@ function generate(base: TrackDesign, piece: KidPiece, rawParams: Record<string, 
   let extra = 0;
   for (let attempt = 0; attempt < 4; attempt++) {
     const { conflicts } = findClashes(result, base.nodes.length, ground);
-    if (conflicts.length === 0) return result;
+    if (conflicts.length === 0) return { design: result, params: shown };
     extra += Math.max(MIN_VERTICAL + 0.5, ...conflicts.map((c) => Math.abs(c.lift))) + 0.5;
     const rise = Math.min(30, extra);
     const ramp = presetById('track').make(
@@ -102,7 +119,7 @@ function generate(base: TrackDesign, piece: KidPiece, rawParams: Record<string, 
   }
   // Last resort: smooth only the simple parts.
   separateCrossings(result, base.nodes.length, ground);
-  return result;
+  return { design: result, params: shown };
 }
 
 /** Elements whose shape must never be bent to clear other track. */
@@ -118,7 +135,7 @@ export function addPiece(design: TrackDesign, id: PieceId, ground: (x: number, z
   const piece = pieceById(id);
   const group = newGroup();
   const next = generate(base, piece, piece.params, group, ground);
-  return { design: next, active: { piece: id, group, start: base.nodes.length, params: { ...piece.params } } };
+  return { design: next.design, active: { piece: id, group, start: base.nodes.length, params: next.params } };
 }
 
 /** Re-make the newest piece with changed parameters. Earlier track is untouched. */
@@ -134,7 +151,7 @@ export function adjustPiece(design: TrackDesign, active: ActivePiece, patch: Rec
   }
   const params = { ...active.params, ...patch };
   const next = generate(base, pieceById(active.piece), params, active.group, ground);
-  return { design: next, active: { ...active, params } };
+  return { design: next.design, active: { ...active, params: next.params } };
 }
 
 export function removePiece(design: TrackDesign): TrackDesign {

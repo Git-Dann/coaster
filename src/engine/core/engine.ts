@@ -462,7 +462,10 @@ export class Engine {
   /** Smoothly move the build camera to look at a point, keeping the current zoom. */
   lookAt(p: V3): void {
     if (this.rig.mode !== 'orbit') return;
-    this.rig.focusOn(new THREE.Vector3(p[0], p[1] - 2, p[2]), Math.max(this.rig.distance, 45));
+    // On a phone the build sheet covers the lower part of the screen: aim below the point so it
+    // sits in the clear upper-middle instead of behind the sheet.
+    const portrait = this.canvas.clientWidth < this.canvas.clientHeight;
+    this.rig.focusOn(new THREE.Vector3(p[0], p[1] - (portrait ? 10 : 2), p[2]), Math.max(this.rig.distance, 45));
   }
 
   frameCoaster(): void {
