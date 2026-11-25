@@ -44,7 +44,8 @@ export function Welcome() {
   const g = useGame.getState;
   return (
     <div className="cc-welcome-wrap">
-      <div className="cc-welcome" role="dialog" aria-label="Welcome to Cozy Coaster">
+      <div className="cc-welcome" role="dialog" aria-modal="true" aria-label="Welcome to Cozy Coaster">
+        <img className="cc-welcome-logo" src="/icons/icon.svg" alt="" width={88} height={88} />
         <h1>Cozy Coaster</h1>
         <p>{returning ? `Welcome back. ${name} is just as you left it.` : "Build at your own pace. There's nothing to win and nowhere to be."}</p>
         <div className="cc-welcome-actions">

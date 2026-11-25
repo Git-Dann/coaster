@@ -28,10 +28,11 @@ export function TopBar() {
         <span className="cc-coaster-name">{name}</span>
       </div>
       <div className="cc-top-right">
-        {camera !== 'orbit' && (
+        {camera !== 'orbit' ? (
           <button
             type="button"
-            className="cc-pill-btn small cc-stop-ride"
+            className="cc-pill-btn small cc-ride-toggle"
+            aria-label="Stop riding"
             onClick={() => {
               ui('close');
               useGame.setState({ camera: 'orbit' });
@@ -39,6 +40,20 @@ export function TopBar() {
             }}
           >
             <Icon name="close" size={18} /> <span>Stop riding</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="cc-pill-btn small cc-ride-toggle"
+            aria-label="Ride along"
+            onClick={() => {
+              ui('success');
+              // Put any sheet away so the ride fills the screen.
+              useGame.setState({ camera: 'front', panel: 'none' });
+              services.engine?.dispatch();
+            }}
+          >
+            <Icon name="play" size={18} /> <span>Ride along</span>
           </button>
         )}
         <IconButton

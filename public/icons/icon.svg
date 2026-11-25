@@ -1,11 +1,46 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#F5EBDD"/>
-  <circle cx="370" cy="150" r="54" fill="#E5C579"/>
-  <path d="M0 380 C110 330 170 350 256 360 C350 372 420 330 512 340 V512 H0Z" fill="#A8B58B"/>
-  <path d="M0 430 C120 400 210 420 300 425 C390 430 450 410 512 415 V512 H0Z" fill="#55745B"/>
-  <g stroke="#F5EBDD" stroke-width="10" stroke-linecap="round">
-    <path d="M150 366 V250 M220 360 V188 M290 362 V226 M360 356 V286"/>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F6C48E"/>
+      <stop offset="0.55" stop-color="#FBE5CA"/>
+      <stop offset="1" stop-color="#FDF3E6"/>
+    </linearGradient>
+    <linearGradient id="hillBack" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#A9C68E"/>
+      <stop offset="1" stop-color="#8DAE76"/>
+    </linearGradient>
+    <linearGradient id="hillFront" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5E8C60"/>
+      <stop offset="1" stop-color="#436B4A"/>
+    </linearGradient>
+    <clipPath id="tile"><rect width="512" height="512" rx="116"/></clipPath>
+  </defs>
+  <g clip-path="url(#tile)">
+    <rect width="512" height="512" fill="url(#sky)"/>
+    <circle cx="392" cy="128" r="84" fill="#F9DAA8" opacity="0.65"/>
+    <circle cx="392" cy="128" r="56" fill="#F09F55"/>
+    <path d="M-10 380 C90 326 170 338 260 358 C350 378 430 330 530 338 V530 H-10Z" fill="url(#hillBack)"/>
+    <g stroke="#FFF4E4" stroke-linecap="round" fill="none">
+      <path d="M110 372 V262 M162 366 V198 M214 366 V180 M266 368 V222 M372 380 V352" stroke-width="11"/>
+      <path d="M110 318 L162 268 L214 318 L266 270" stroke-width="7" opacity="0.9"/>
+    </g>
+    <path d="M-20 384 C40 384 66 306 104 256 C142 206 178 172 214 172 C256 172 270 232 292 278 C312 318 338 344 372 344 C418 344 440 304 436 266 C432 228 404 206 376 210 C346 214 334 252 352 282 C374 318 430 334 540 322" fill="none" stroke="#7A3A2A" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M-20 384 C40 384 66 306 104 256 C142 206 178 172 214 172 C256 172 270 232 292 278 C312 318 338 344 372 344 C418 344 440 304 436 266 C432 228 404 206 376 210 C346 214 334 252 352 282 C374 318 430 334 540 322" fill="none" stroke="#E27C52" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+    <g transform="translate(220.4 172.5) rotate(8.9)">
+      <rect x="-28" y="-51" width="56" height="36" rx="11" fill="#2B5A70"/>
+      <rect x="-19" y="-44" width="38" height="11" rx="5.5" fill="#CDE7EF"/>
+      <rect x="-28" y="-24" width="56" height="9" rx="4.5" fill="#1F4456"/>
+    </g>
+    <g transform="translate(161.8 193.6) rotate(-38.1)">
+      <rect x="-28" y="-51" width="56" height="36" rx="11" fill="#2B5A70"/>
+      <rect x="-19" y="-44" width="38" height="11" rx="5.5" fill="#CDE7EF"/>
+      <rect x="-28" y="-24" width="56" height="9" rx="4.5" fill="#1F4456"/>
+    </g>
+    <g transform="translate(117.2 239.3) rotate(-50.8)">
+      <rect x="-28" y="-51" width="56" height="36" rx="11" fill="#2B5A70"/>
+      <rect x="-19" y="-44" width="38" height="11" rx="5.5" fill="#CDE7EF"/>
+      <rect x="-28" y="-24" width="56" height="9" rx="4.5" fill="#1F4456"/>
+    </g>
+    <path d="M-10 438 C110 404 200 422 300 428 C400 434 450 412 530 418 V530 H-10Z" fill="url(#hillFront)"/>
   </g>
-  <path d="M70 330 C120 330 140 190 220 182 C290 176 280 270 330 280 C380 290 400 300 450 300" fill="none" stroke="#C77D62" stroke-width="22" stroke-linecap="round"/>
-  <rect x="300" y="250" width="52" height="30" rx="10" fill="#8DAABB" transform="rotate(12 326 265)"/>
 </svg>
