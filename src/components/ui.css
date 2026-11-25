@@ -1260,7 +1260,8 @@
 }
 .cc-seg {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   gap: 4px;
   padding: 4px;
   border-radius: 18px;
@@ -1420,4 +1421,12 @@
   .cc-pill-btn.small {
     min-height: 34px;
   }
+}
+
+.cc-build-note {
+  margin: 0;
+  padding: 0 18px;
+  font-size: 0.78rem;
+  color: var(--forest, #55745b);
+  font-weight: var(--fw-bold);
 }

@@ -28,3 +28,8 @@ Rate limiting and a 24-voice cap stop continuous drags from machine-gunning. Aud
 ## Not yet done
 
 Levels have only been checked in code and unit tests with a fake AudioContext. They have **not** been listened to on phone speakers, headphones or desktop speakers; expect a tuning pass.
+
+
+## Edit-mode piece sounds
+
+Adding a piece plays a short recipe for its kind (`PIECE_RECIPES` in `src/engine/audio/sounds.ts`): five soft ratchet clicks (wooden taps with a touch transient) for climbs and lifts, a falling band-passed pink-noise whoosh for drops and hills, a rising-then-falling swirl for loops, rolls, corkscrews and spirals, a gentle high hiss for brakes, a low-to-high surge with a soft thump for launches, and a single tap for level track. All are on the construction bus, below ~2.5 kHz and quiet, so they sit under the lo-fi music and the ambience. Up pieces are chain lifts, so the existing ride ratchet (`chainClack`) plays as the train climbs them.

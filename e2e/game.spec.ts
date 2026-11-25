@@ -56,8 +56,8 @@ test('edit mode: the ghost shows the next piece; add, turn, climb, specials, rem
   test.setTimeout(180_000);
   await page.goto('/');
   await ready(page);
-  await page.getByRole('button', { name: 'Explore the meadow' }).click();
-  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  // Start blank: just the station, and the edit panel opens.
+  await page.getByRole('button', { name: /Start blank/ }).click();
   const btn = (name: string) => page.getByRole('button', { name, exact: true });
   // The train waits in the station while building, and a ghost piece is shown (nothing committed yet).
   await expect.poll(() => page.evaluate(() => (window as any).__cozy.engine.sim.state)).toBe('hold');
@@ -72,6 +72,10 @@ test('edit mode: the ghost shows the next piece; add, turn, climb, specials, rem
     await btn('Add piece').click();
     expect(await connected(page)).toBe(true);
   }
+  // A loop needs speed: the panel offers a Launch, and the Loop appears once there's speed for it.
+  await btn('Launch').click();
+  await btn('Add piece').click();
+  await expect(btn('Loop')).toBeVisible({ timeout: 20_000 });
   await btn('Loop').click();
   await expect(page.getByText(/Loop ends/)).toBeVisible();
   await btn('Add piece').click();
@@ -95,8 +99,7 @@ test('edit mode: no dead buttons, select and change a piece in the middle, remov
   test.setTimeout(240_000);
   await page.goto('/');
   await ready(page);
-  await page.getByRole('button', { name: 'Explore the meadow' }).click();
-  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  await page.getByRole('button', { name: /Start blank/ }).click();
   const btn = (name: string) => page.getByRole('button', { name, exact: true });
   const ghostEnd = () => page.evaluate(() => { const d = (window as any).__cozy.engine.previewDesign; const n = d?.nodes[d.nodes.length - 1]; return n ? n.p.map((v: number) => v.toFixed(2)).join(',') : ''; });
   // Every enabled direction/slope combination must give its own ghost.
@@ -105,8 +108,9 @@ test('edit mode: no dead buttons, select and change a piece in the middle, remov
   for (const dir of ['Turn left', 'Straight', 'Turn right']) {
     for (const slope of ['Down', 'Level', 'Up']) {
       await btn(dir).click();
-      const sb = page.getByRole('group', { name: 'Slope' }).getByRole('button').nth(['Down', 'Level', 'Up'].indexOf(slope));
-      if (await sb.isDisabled()) continue;
+      // Options that don't fit here are hidden (contextual), so only offered ones are checked.
+      const sb = page.getByRole('group', { name: 'Slope' }).getByRole('button', { name: slope, exact: true });
+      if ((await sb.count()) === 0) continue;
       await sb.click();
       // Wait until the ghost has been planned for this exact choice (slow machines lag a frame or two).
       await expect.poll(() => page.evaluate(() => { const s = (window as any).__cozy.store.getState(); return s.ghost?.forChoice === JSON.stringify(s.buildChoice); }), { timeout: 15_000 }).toBe(true);
@@ -117,15 +121,17 @@ test('edit mode: no dead buttons, select and change a piece in the middle, remov
   }
   // Build a few pieces, then step back and change one in the middle.
   await btn('Straight').click();
-  await page.getByRole('group', { name: 'Slope' }).getByRole('button').nth(1).click();
+  await page.getByRole('group', { name: 'Slope' }).getByRole('button', { name: 'Level', exact: true }).click();
   for (let i = 0; i < 3; i++) await btn('Add piece').click();
   await btn('Previous piece').click();
   await btn('Previous piece').click();
   await expect(page.getByText(/^Piece \d+ of \d+$/)).toBeVisible();
   const before = await nodeCount(page);
-  await btn('Loop').click();
+  // Change it into something that fits here (whatever the panel offers first among the shapes).
+  await page.waitForTimeout(500);
+  await btn('Turn left').click();
   await btn('Apply change').click();
-  await expect.poll(() => nodeCount(page)).toBeGreaterThan(before);
+  await expect.poll(() => nodeCount(page)).not.toBe(before);
   expect(await connected(page)).toBe(true);
   await btn('Remove this piece').click();
   expect(await connected(page)).toBe(true);

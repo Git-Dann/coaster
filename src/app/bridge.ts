@@ -3,8 +3,9 @@ import type { SimEvent } from '../engine/physics/train-sim';
 import type { V3 } from '../engine/core/vec3';
 import { useGame } from '../stores/game';
 import { planDragToPiece } from '../features/builder/builder';
-import { addPiece, adjustPiece, clampParam, pieceById, piecesOf, planNext, removePiece, replacePiece, type BuildChoice, type NextPiece, type PieceId } from '../features/builder/simple-builder';
+import { SPECIALS, addPiece, adjustPiece, clampParam, pieceById, piecesOf, planNext, removePiece, replacePiece, type BuildChoice, type NextPiece, type PieceId } from '../features/builder/simple-builder';
 import { gridFrame } from '../engine/track/grid';
+import type { PieceSound } from '../engine/audio/sounds';
 import { TIMBER_STYLES } from '../engine/supports/support-gen';
 import type { TrackDesign } from '../engine/track/types';
 import { newItemId } from '../features/saves';
@@ -114,6 +115,7 @@ export function refreshGhost(): void {
         let crossing: NextPiece['crossing'] = null;
         let atGround = false;
         let dropped = 0;
+        let blocked: string | null = null;
         if (changed) {
           const r = replacePiece(g.design, piece.group, g.buildChoice, ground, e.track);
           const first = planNext(base, g.buildChoice, ground, e.track);
@@ -122,6 +124,7 @@ export function refreshGhost(): void {
           height = first.height;
           crossing = first.crossing;
           atGround = first.atGround;
+          blocked = first.blocked;
           e.setPreview(r.design, { fromNode: r.start - 1, toNode: r.design.nodes.length - 1 });
         } else {
           pendingEdit = null;
@@ -133,7 +136,7 @@ export function refreshGhost(): void {
         e.setGrid(gridFrame(g.design), at);
         const from = g.design.nodes[Math.max(0, piece.start - 1)]!.p;
         e.lookAt([(from[0] + at[0]) / 2, (from[1] + at[1]) / 2, (from[2] + at[2]) / 2], choiceDistance(g.buildChoice));
-        useGame.setState({ ghost: { height, atGround, crossing, downBlocked: !!down?.atGround, changed, dropped, forChoice: JSON.stringify(g.buildChoice) } });
+        useGame.setState({ ghost: { height, atGround, crossing, downBlocked: !!down?.atGround, changed, dropped, forChoice: JSON.stringify(g.buildChoice), blocked } });
         return;
       }
       // Adding to the end.
@@ -146,7 +149,7 @@ export function refreshGhost(): void {
       e.setPreview(ghostPlan.design);
       e.setGrid(gridFrame(ghostPlan.design), end.p);
       e.lookAt([(from.p[0] + end.p[0]) / 2, (from.p[1] + end.p[1]) / 2, (from.p[2] + end.p[2]) / 2], choiceDistance(g.buildChoice));
-      useGame.setState({ ghost: { height: ghostPlan.height, atGround: ghostPlan.atGround, crossing: ghostPlan.crossing, downBlocked: !!down?.atGround, changed: true, dropped: 0, forChoice: JSON.stringify(g.buildChoice) } });
+      useGame.setState({ ghost: { height: ghostPlan.height, atGround: ghostPlan.atGround, crossing: ghostPlan.crossing, downBlocked: !!down?.atGround, changed: true, dropped: 0, forChoice: JSON.stringify(g.buildChoice), blocked: ghostPlan.blocked } });
     } catch (err) {
       // Never let a planning problem break the game: just show no ghost for this choice.
       console.warn('Could not plan the piece', err);
@@ -156,6 +159,63 @@ export function refreshGhost(): void {
       useGame.setState({ ghost: null });
     }
   });
+}
+
+let availToken = 0;
+/**
+ * Work out which options fit smoothly where you're building, a few per frame so the panel stays
+ * responsive. Options that don't fit are hidden; a chosen option that stops fitting falls back to
+ * a level straight.
+ */
+export function refreshAvailability(): void {
+  const token = ++availToken;
+  const g0 = useGame.getState();
+  if (g0.panel !== 'build') return;
+  const pieces = piecesOf(g0.design);
+  const sel = g0.editSel ? pieces.find((p) => p.group === g0.editSel) : null;
+  const base: TrackDesign = sel ? { ...g0.design, nodes: g0.design.nodes.slice(0, sel.start) } : g0.design;
+  const jobs: Array<() => void> = [];
+  const specials: string[] = [];
+  const down: Record<string, boolean> = {};
+  const committed = services.engine?.track;
+  const needSpeed: string[] = [];
+  const needHeight: string[] = [];
+  for (const id of SPECIALS) jobs.push(() => {
+    const b = planNext(base, { kind: 'special', id }, ground, committed).blocked;
+    if (!b) specials.push(id);
+    else if (/speed/.test(b)) needSpeed.push(pieceById(id).label);
+    else if (/height/.test(b)) needHeight.push(pieceById(id).label);
+  });
+  for (const turn of [-1, 0, 1] as const) jobs.push(() => {
+    const p = planNext(base, { kind: 'track', turn, slope: -1 }, ground, committed);
+    down[turn] = !p.atGround && !p.blocked;
+  });
+  const step = () => {
+    if (token !== availToken) return; // the track changed again: start over
+    const t0 = performance.now();
+    while (jobs.length && performance.now() - t0 < 12) {
+      try {
+        jobs.shift()!();
+      } catch {
+        /* an option that can't even be planned simply isn't offered */
+      }
+    }
+    if (jobs.length) {
+      requestAnimationFrame(step);
+      return;
+    }
+    const g = useGame.getState();
+    const c = g.buildChoice;
+    const stillOk = c.kind === 'special' ? specials.includes(c.id) : c.slope >= 0 || down[c.turn] !== false;
+    const list = (a: string[]) => (a.length > 1 ? `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}` : a[0]);
+    const note = needSpeed.length
+      ? `${list(needSpeed)} ${needSpeed.length > 1 ? 'need' : 'needs'} more speed: add a Lift or a Launch first`
+      : needHeight.length
+        ? `${list(needHeight)} ${needHeight.length > 1 ? 'need' : 'needs'} some height first: add a Lift`
+        : null;
+    useGame.setState({ avail: { specials, down, note }, ...(stillOk ? {} : { buildChoice: { kind: 'track' as const, turn: 0 as const, slope: 0 as const } }) });
+  };
+  requestAnimationFrame(step);
 }
 
 /** Camera distance for the edit view: specials are taller, so stand back a little. */
@@ -174,19 +234,38 @@ export function chooseBuild(c: BuildChoice): void {
 export function addGhost(): void {
   const g = useGame.getState();
   if (g.editSel) {
-    if (!pendingEdit) return;
+    if (!pendingEdit || g.ghost?.blocked) return;
     const { design, index } = pendingEdit;
     g.commitDesign(design);
     // Keep the same position selected (the changed piece has a new name).
     useGame.setState({ editSel: piecesOf(design)[index]?.group ?? null });
-    services.engine?.audio.build(material(design), 'place');
+    services.engine?.audio.piece(pieceSound(g.buildChoice));
     announce('Piece changed.');
     return;
   }
   const plan = ghostPlan ?? planNext(g.design, g.buildChoice, ground, services.engine?.track);
+  if (plan.blocked) return; // never build anything rough
   g.commitDesign(plan.design);
-  services.engine?.audio.build(material(plan.design), 'place');
+  services.engine?.audio.piece(pieceSound(g.buildChoice));
   announce('Piece added.');
+}
+
+/** What a piece sounds like as it's added: ratchet for climbs, whoosh for drops, and so on. */
+function pieceSound(c: BuildChoice): PieceSound {
+  if (c.kind === 'track') return c.slope > 0 ? 'ratchet' : c.slope < 0 ? 'whoosh' : 'track';
+  switch (c.id) {
+    case 'lift':
+      return 'ratchet';
+    case 'drop':
+    case 'hill':
+      return 'whoosh';
+    case 'brakes':
+      return 'hiss';
+    case 'launch':
+      return 'launch';
+    default:
+      return 'loop';
+  }
 }
 
 /** Remove the selected piece; the pieces after it move up to close the gap. */
@@ -405,6 +484,7 @@ export function connectStore(engine: Engine): () => void {
     // Edit mode: the train waits in the station, and the ghost follows every change.
     if (s.panel !== p.panel && (s.panel === 'build' || p.panel === 'build')) engine.holdTrain(s.panel === 'build');
     if (s.panel === 'build' || p.panel === 'build') if (s.design !== p.design || s.panel !== p.panel || s.buildChoice !== p.buildChoice || s.editSel !== p.editSel) refreshGhost();
+    if (s.panel === 'build' && (s.design !== p.design || s.panel !== p.panel || s.editSel !== p.editSel)) refreshAvailability();
   });
   syncHandles(engine);
   return unsub;

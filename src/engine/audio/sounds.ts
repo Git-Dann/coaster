@@ -186,6 +186,62 @@ const STEEL: BuildRecipes = {
 
 export const BUILD_RECIPES: Readonly<Record<BuildMaterial, BuildRecipes>> = { timber: TIMBER, steel: STEEL };
 
+// ----- edit mode: a sound for each kind of piece ----------------------------------------------------------------------
+
+export type PieceSound = 'ratchet' | 'whoosh' | 'loop' | 'hiss' | 'launch' | 'track';
+
+/**
+ * Played when a piece is added in edit mode, so building sounds like the ride it makes: a few soft ratchet clicks for
+ * climbs and lifts, a gentle whoosh for drops, a rising swirl for loops and rolls, a hiss for brakes, a surge for a
+ * launch. Everything is filtered noise and low wooden taps, quiet and below ~2.5 kHz, so it sits under the lo-fi music
+ * and the birds rather than over them.
+ */
+export const PIECE_RECIPES: Readonly<Record<PieceSound, RecipeEntry>> = {
+  ratchet: {
+    dur: 0.55,
+    play: (ctx, n, out, t) => {
+      for (let i = 0; i < 5; i++) {
+        const at = t + i * vary(0.095, 0.08);
+        touch(ctx, n, out, at, 1900, 0.05, 0.006);
+        woodBody(ctx, out, at, vary(260, 0.05), 0.07, 0.035);
+      }
+    },
+  },
+  whoosh: {
+    dur: 0.7,
+    play: (ctx, n, out, t) => {
+      playNoise(ctx, out, { buffer: n.pink, at: t, gain: vary(0.09, 0.1), attack: 0.12, decay: 0.5, type: 'bandpass', freq: 900, freqEnd: 260, q: 0.9 });
+    },
+  },
+  loop: {
+    dur: 0.9,
+    play: (ctx, n, out, t) => {
+      playNoise(ctx, out, { buffer: n.pink, at: t, gain: vary(0.07, 0.1), attack: 0.2, decay: 0.6, type: 'bandpass', freq: 300, freqEnd: 1100, q: 1.1 });
+      playNoise(ctx, out, { buffer: n.pink, at: t + 0.35, gain: 0.05, attack: 0.15, decay: 0.4, type: 'bandpass', freq: 1100, freqEnd: 400, q: 1.1 });
+    },
+  },
+  hiss: {
+    dur: 0.5,
+    play: (ctx, n, out, t) => {
+      playNoise(ctx, out, { buffer: n.white, at: t, gain: vary(0.035, 0.1), attack: 0.02, decay: 0.4, type: 'bandpass', freq: 2200, freqEnd: 1600, q: 0.8 });
+    },
+  },
+  launch: {
+    dur: 0.8,
+    play: (ctx, n, out, t) => {
+      playNoise(ctx, out, { buffer: n.pink, at: t, gain: vary(0.08, 0.1), attack: 0.08, decay: 0.6, type: 'bandpass', freq: 180, freqEnd: 1400, q: 1.4 });
+      woodBody(ctx, out, t, 110, 0.06, 0.12);
+    },
+  },
+  track: {
+    dur: 0.25,
+    play: (ctx, n, out, t) => {
+      touch(ctx, n, out, t, 1400, 0.05);
+      woodBody(ctx, out, t + 0.01, vary(180, 0.05), 0.08, 0.09);
+    },
+  },
+};
+
 // ----- continuous support growth -------------------------------------------------------------------------------------
 
 /**

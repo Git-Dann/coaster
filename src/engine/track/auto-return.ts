@@ -185,7 +185,11 @@ function returnPath(design: TrackDesign, opt: ReturnOptions, R: number): { out: 
       const ease = u * u * (3 - 2 * u);
       const slopeCarry = Math.tan(startPitch) * total * (u - 2 * u * u + u * u * u);
       let y = y0 + (y1 - y0) * ease + slopeCarry;
-      y = Math.max(y, opt.groundAt(x, z) + 1.1);
+      // Clear the ground here and on the way here (terrain can rise between nodes).
+      const px = out.length ? out[out.length - 1]!.p[0] : last.p[0];
+      const pz = out.length ? out[out.length - 1]!.p[2] : last.p[2];
+      const g = Math.max(opt.groundAt(x, z), opt.groundAt((x + px) / 2, (z + pz) / 2), opt.groundAt(x * 0.75 + px * 0.25, z * 0.75 + pz * 0.25), opt.groundAt(x * 0.25 + px * 0.75, z * 0.25 + pz * 0.75));
+      y = Math.max(y, g + 1.3);
       const nextKind = segs[si]!.kind;
       const bank = wind + first.bank + (nextKind === 'S' ? 0 : (nextKind === 'L' ? -1 : 1) * bankMag * Math.min(1, Math.sin(Math.PI * Math.min(1, (k + 1) / n)) * 3));
       out.push({ id: `ret_${si}_${k}`, p: [x, y, z], dir: [Math.cos(h), 0, -Math.sin(h)], bank, kind: 'track', group: 'return' });

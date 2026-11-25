@@ -8,7 +8,7 @@ import { gridFrame, onGrid, toGrid } from '../engine/track/grid';
 import { MIN_VERTICAL } from '../engine/track/clearance';
 import { TrainSim } from '../engine/physics/train-sim';
 import { DEFAULT_PHYSICS } from '../engine/train/config';
-import { SPECIALS, decodeChoice, freshCoaster, piecesOf, planNext, removePiece, replacePiece, type BuildChoice } from '../features/builder/simple-builder';
+import { SPECIALS, roughness, decodeChoice, freshCoaster, piecesOf, planNext, removePiece, replacePiece, type BuildChoice } from '../features/builder/simple-builder';
 import { cfg } from './physics/helpers';
 import type { TrackDesign } from '../engine/track/types';
 
@@ -82,6 +82,7 @@ describe('edit mode builds on the grid', () => {
 
   test('random building sessions: always on the grid, closed, clash-free, never below ground, the train never errors', () => {
     const rnd = mulberry32(99);
+    let blockedSeen = 0;
     for (let trial = 0; trial < 30; trial++) {
       let d = trial % 2 ? starterPlayable(PAD_HEIGHT + 1) : freshCoaster(starterPlayable(PAD_HEIGHT + 1), PAD_HEIGHT + 1, ground);
       const steps = 2 + Math.floor(rnd() * 10);
@@ -92,6 +93,12 @@ describe('edit mode builds on the grid', () => {
         }
         const c = choices[Math.floor(rnd() * choices.length)]!;
         const plan = planNext(d, c, ground);
+        // Like a player: options that don't fit smoothly aren't offered, so they're never built.
+        if (plan.blocked) {
+          blockedSeen++;
+          continue;
+        }
+        expect(roughness(plan.design, plan.start, c), `trial ${trial} step ${k}`).toBeNull();
         d = plan.design;
         const end = d.nodes[d.nodes.length - 1]!;
         expect(onGrid(gridFrame(d), end.p, end.dir), `trial ${trial} step ${k} ${JSON.stringify(c)}`).toBe(true);
@@ -100,7 +107,12 @@ describe('edit mode builds on the grid', () => {
       expect(t.closed).toBe(true);
       expect(t.diagnostics.seamFlip, `trial ${trial}`).toBe(false);
       expect(worstClash(t), `trial ${trial}`).toBeGreaterThanOrEqual(MIN_VERTICAL - 0.6);
-      for (let i = 0; i < t.count; i += 4) expect(t.pos[i * 3 + 1]! - ground(t.pos[i * 3]!, t.pos[i * 3 + 2]!), `trial ${trial}`).toBeGreaterThan(0.4);
+      const cc = withReturn(d, { groundAt: ground, speed: 15 });
+      for (let i = 0; i < t.count; i += 4) {
+        let seg = 0;
+        while (seg + 1 < t.nodeS.length && t.nodeS[seg + 1]! <= i * t.ds) seg++;
+        expect(t.pos[i * 3 + 1]! - ground(t.pos[i * 3]!, t.pos[i * 3 + 2]!), `trial ${trial} at s=${(i * t.ds).toFixed(0)} in ${cc.nodes[seg + 1]?.group}`).toBeGreaterThan(0.4);
+      }
       let twist = 0;
       for (let i = 1; i < t.count; i++) twist = Math.max(twist, Math.abs(t.bank[i]! - t.bank[i - 1]!) / t.ds);
       expect(twist, `trial ${trial} twist rate`).toBeLessThan(0.7);
@@ -112,6 +124,8 @@ describe('edit mode builds on the grid', () => {
         sim.events.length = 0;
       }
     }
+    // The smoothness/speed checks really are exercised by these sessions.
+    expect(blockedSeen).toBeGreaterThan(0);
   }, 90_000);
 
   test('regression (playtest): every piece in turn, every special, then keyboard pieces: no clash, no twist', () => {
@@ -121,7 +135,12 @@ describe('edit mode builds on the grid', () => {
     for (const id of SPECIALS) seq.push({ kind: 'special', id });
     seq.push({ kind: 'track', turn: 1, slope: 0 }, { kind: 'track', turn: 1, slope: 1 }, { kind: 'track', turn: -1, slope: 1 }, 'rm');
     for (const c of seq) {
-      d = c === 'rm' ? removePiece(d) : planNext(d, c, ground).design;
+      if (c === 'rm') d = removePiece(d);
+      else {
+        const p = planNext(d, c, ground);
+        if (p.blocked) continue;
+        d = p.design;
+      }
       for (const speed of [10, 16, 22]) {
         const t = new BakedTrack(withReturn(d, { groundAt: ground, speed }));
         expect(worstClash(t), `${JSON.stringify(c)} at speed ${speed}`).toBeGreaterThanOrEqual(MIN_VERTICAL - 0.6);
@@ -193,6 +212,43 @@ describe('edit mode builds on the grid', () => {
     expect(t.closed).toBe(true);
     expect(worstClash(t)).toBeGreaterThanOrEqual(MIN_VERTICAL - 0.6);
   });
+
+  test('a drop at ground level is not offered (it needs height), and is offered once there is height', () => {
+    let d = starterPlayable(PAD_HEIGHT + 1);
+    for (let i = 0; i < 3; i++) d = planNext(d, { kind: 'track', turn: 0, slope: -1 }, ground).design;
+    expect(planNext(d, { kind: 'special', id: 'drop' }, ground).blocked).toMatch(/height/i);
+    // Gain height the way the panel suggests: a Lift.
+    const lift = planNext(d, { kind: 'special', id: 'lift' }, ground);
+    expect(lift.blocked).toBeNull();
+    d = lift.design;
+    const p = planNext(d, { kind: 'special', id: 'drop' }, ground);
+    expect(p.blocked).toBeNull();
+    expect(roughness(p.design, p.start, { kind: 'special', id: 'drop' })).toBeNull();
+  });
+
+  test('the train always makes it: built pieces never strand the train (checked in the real simulation)', () => {
+    const rnd = mulberry32(2024);
+    for (let trial = 0; trial < 12; trial++) {
+      let d = starterPlayable(PAD_HEIGHT + 1);
+      for (let k = 0; k < 10; k++) {
+        const c = choices[Math.floor(rnd() * choices.length)]!;
+        const p = planNext(d, c, ground);
+        if (!p.blocked) d = p.design;
+      }
+      const t = new BakedTrack(withReturn(d, { groundAt: ground, speed: 14 }));
+      const sim = new TrainSim(t, cfg(4), { ...DEFAULT_PHYSICS });
+      sim.dispatch();
+      const userEnd = t.nodeS[d.nodes.length - 1]!;
+      let reached = false;
+      for (let i = 0; i < 120 * 240 && !reached; i++) {
+        sim.step(1 / 120);
+        for (const e of sim.events) expect(e.type, `trial ${trial} stalled at ${sim.s.toFixed(0)} of ${userEnd.toFixed(0)}`).not.toBe('stall');
+        sim.events.length = 0;
+        if (sim.s > userEnd) reached = true;
+      }
+      expect(reached, `trial ${trial}: the train should get round everything that was built`).toBe(true);
+    }
+  }, 120_000);
 
   test('the ghost knows when it is at the ground and when it passes under other track', () => {
     let d = starterPlayable(PAD_HEIGHT + 1);

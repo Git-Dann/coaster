@@ -2,6 +2,12 @@ import type { V3 } from '../../engine/core/vec3';
 import { BakedTrack } from '../../engine/track/bake';
 import { appendElement, cloneDesign, liftAboveGround, removeLastPiece, uprightBankAtEnd } from '../../engine/track/design-ops';
 import type { TrackDesign, TrackNode } from '../../engine/track/types';
+import { SECTION_KINDS } from '../../engine/track/types';
+
+const KIND_LIFT = SECTION_KINDS.indexOf('lift');
+const KIND_LAUNCH = SECTION_KINDS.indexOf('launch');
+const KIND_BRAKE = SECTION_KINDS.indexOf('brake');
+const KIND_STATION = SECTION_KINDS.indexOf('station');
 import { MIN_VERTICAL, PLAN_RADIUS, findClashes, separateCrossings } from '../../engine/track/clearance';
 import { LEVEL, TILE, gridFrame, gridTarget, onGrid, pathTo, snapLevel, type GridFrame } from '../../engine/track/grid';
 import { estimateSpeedAtEnd, presetById, type PresetId } from './builder';
@@ -56,6 +62,9 @@ let serial = 0;
 const newGroup = () => `g${Date.now().toString(36)}${(serial++).toString(36)}`;
 
 /** Build `design` + piece from the node before `start`. Never alters nodes before the piece. */
+/** Chain speed on climbing pieces (m/s), the same as a standard lift hill. */
+const CHAIN_SPEED = 3.4;
+
 /** Steepest gentle climb or descent for plain track pieces (about 19° on average, under 30° at the steepest point): taller rises get longer. */
 const MAX_GRADE = 0.35;
 
@@ -211,21 +220,206 @@ export interface NextPiece {
   atGround: boolean;
   /** Committed track passing above or below the new piece, if any (clear gap in metres). */
   crossing: { above: boolean; gap: number } | null;
+  /** Why this piece can't be built smoothly here (null when it can). Nothing rough is ever built. */
+  blocked: string | null;
 }
+
+/**
+ * Walk the train's speed along the track from the station, the way the physics will play out:
+ * chain lifts pull up to their chain speed, launches push to their launch speed, brakes trim, and
+ * otherwise gravity, rolling resistance and air drag act (slightly pessimistic, so a "yes" holds
+ * in the real simulation). Returns where the train would run out of speed, if anywhere, and the
+ * lowest speed reached from `fromS` on.
+ */
+export function energyWalk(t: BakedTrack, roughness = 1, fromS = 0, v0 = 2): { stallS: number | null; minV: number; minVInverted: number; vEnd: number } {
+  const g = 9.81;
+  const mu = 0.0045 * roughness * 1.4;
+  const k = 0.0009; // drag per metre (½ρ·CdA/m), rounded up
+  let v = v0; // the station tyres send the train off at about 2 m/s
+  let minV = Infinity;
+  let minVInverted = Infinity;
+  const step = 2;
+  for (let i = step; i < t.count; i += step) {
+    const s = i * t.ds;
+    const ds = step * t.ds;
+    const dy = t.pos[i * 3 + 1]! - t.pos[(i - step) * 3 + 1]!;
+    const kind = t.kind[i]!;
+    const param = t.param[i]!;
+    const curv = t.curv[i]!;
+    const v2 = v * v - 2 * g * dy - 2 * (mu * g * (1 + (curv * v * v) / g) + k * v * v) * ds;
+    v = Math.sqrt(Math.max(0, v2));
+    if (kind === KIND_LIFT) v = Math.max(v, param || 3.4);
+    else if (kind === KIND_LAUNCH) v = Math.max(v, param || 18);
+    else if (kind === KIND_BRAKE && param > 0) v = Math.min(v, Math.max(param, 1.5));
+    else if (kind === KIND_STATION) v = Math.max(v, 1.5);
+    if (s >= fromS) {
+      minV = Math.min(minV, v);
+      if (t.up[i * 3 + 1]! < 0.2) minVInverted = Math.min(minVInverted, v);
+    }
+    if (v < 0.6) return { stallS: s, minV: Math.min(minV, v), minVInverted, vEnd: 0 };
+  }
+  return { stallS: null, minV, minVInverted, vEnd: v };
+}
+
+/** How many up-and-down bumps each kind of piece naturally has (plain track: one gentle ramp). */
+const NATURAL_BUMPS: Partial<Record<PieceId, number>> = { hill: 2, loop: 2, roll: 2, corkscrew: 2, lift: 1, drop: 1, helix: 1 };
+/** Tightest natural curvature (1/m) of each element; plain track and joins stay far gentler. */
+const MAX_CURVATURE: Partial<Record<PieceId, number>> = { loop: 0.2, roll: 0.24, corkscrew: 0.24, hill: 0.13, lift: 0.13, drop: 0.13, helix: 0.1 };
+
+/**
+ * Smoothness check for a planned piece (and the join into it): no wobbles (more vertical bumps than
+ * the piece naturally has), no kinks (curvature tighter than the element needs) and no sudden
+ * changes in curvature.
+ */
+export function roughness(design: TrackDesign, start: number, choice: BuildChoice): string | null {
+  const part = new BakedTrack({ ...design, closed: false, nodes: design.nodes.slice(Math.max(0, start - 1)) }, 0.25);
+  const id = choice.kind === 'special' ? choice.id : null;
+  const maxK = (id && MAX_CURVATURE[id]) ?? 0.11;
+  let k = 0;
+  let dk = 0;
+  for (let i = 4; i < part.count - 4; i++) {
+    k = Math.max(k, part.curv[i]!);
+    dk = Math.max(dk, Math.abs(part.curv[i + 2]! - part.curv[i - 2]!) / (4 * part.ds));
+  }
+  // Count height turning points with some prominence (ignoring sub-50 cm ripples).
+  let bumps = 0;
+  let dir = 0;
+  let pivot = part.pos[1]!;
+  for (let i = 1; i < part.count; i++) {
+    const y = part.pos[i * 3 + 1]!;
+    if (dir >= 0 && y < pivot - 0.5) {
+      if (dir > 0) bumps++;
+      dir = -1;
+      pivot = y;
+    } else if (dir <= 0 && y > pivot + 0.5) {
+      if (dir < 0) bumps++;
+      dir = 1;
+      pivot = y;
+    } else if ((dir > 0 && y > pivot) || (dir < 0 && y < pivot)) pivot = y;
+  }
+  const allowed = (id ? NATURAL_BUMPS[id] ?? 1 : 1) + 1;
+  if (bumps > allowed || dk > 0.4 || k > maxK * 1.15) return 'Too close to other track to fit smoothly here. Try another direction, or go up or down first';
+  return null;
+}
+
+// ------------------------------------------------------------------ fast planning (edit mode)
+
+/**
+ * Everything about the existing track that every option needs, worked out once per design (not
+ * once per option): expected speed, the train's speed arriving at the end, and a spatial index
+ * of the track (plus the fixed station approach) for clash checks.
+ */
+interface BaseInfo {
+  speed: number;
+  vEnd: number;
+  stalled: boolean;
+  /** Sample positions (x, y, z) every metre, and whether each is far enough back to count for clashes. */
+  pts: Float64Array;
+  far: Uint8Array;
+  cells: Map<string, number[]>;
+}
+const baseCache = new WeakMap<TrackDesign, BaseInfo>();
+const CELL = 4;
+const cellKey = (x: number, z: number) => `${Math.floor(x / CELL)},${Math.floor(z / CELL)}`;
+
+function baseInfo(base: TrackDesign): BaseInfo {
+  const hit = baseCache.get(base);
+  if (hit) return hit;
+  const pts: number[] = [];
+  const far: number[] = [];
+  let speed = 8;
+  let vEnd = 2;
+  let stalled = false;
+  if (base.nodes.length >= 2) {
+    const t = new BakedTrack({ ...base, closed: false }, 0.5);
+    speed = estimateSpeedAtEnd(base, t);
+    const e = energyWalk(t, base.style === 'wood' ? 1.55 : base.style === 'mine' ? 1.3 : 1);
+    vEnd = e.vEnd;
+    stalled = e.stallS !== null;
+    // Track within 30 m (along the circuit) of the end is where new track joins: not a clash.
+    for (let i = 0; i < t.count; i += 2) {
+      pts.push(t.pos[i * 3]!, t.pos[i * 3 + 1]!, t.pos[i * 3 + 2]!);
+      far.push(i * t.ds < t.length - 30 ? 1 : 0);
+    }
+  }
+  // The automatic return always arrives along a straight brake run into the station.
+  const f = base.nodes[0]!;
+  for (let m = 1; m <= 40; m++) {
+    pts.push(f.p[0] - f.dir[0] * m, f.p[1], f.p[2] - f.dir[2] * m);
+    far.push(1);
+  }
+  const cells = new Map<string, number[]>();
+  for (let i = 0; i < pts.length / 3; i++) {
+    const k = cellKey(pts[i * 3]!, pts[i * 3 + 2]!);
+    let l = cells.get(k);
+    if (!l) cells.set(k, (l = []));
+    l.push(i);
+  }
+  const info = { speed, vEnd, stalled, pts: Float64Array.from(pts), far: Uint8Array.from(far), cells };
+  baseCache.set(base, info);
+  return info;
+}
+
+/** Does the new piece (baked on its own) come within the clash rule of existing track, or of itself? */
+function fastConflicts(info: BaseInfo, part: BakedTrack): boolean {
+  const R = PLAN_RADIUS + 0.7;
+  for (let i = 0; i < part.count; i += 2) {
+    const x = part.pos[i * 3]!;
+    const y = part.pos[i * 3 + 1]!;
+    const z = part.pos[i * 3 + 2]!;
+    const cx = Math.floor(x / CELL);
+    const cz = Math.floor(z / CELL);
+    for (let gx = -1; gx <= 1; gx++)
+      for (let gz = -1; gz <= 1; gz++) {
+        const l = info.cells.get(`${cx + gx},${cz + gz}`);
+        if (!l) continue;
+        for (const j of l) {
+          if (!info.far[j]) continue;
+          const dx = info.pts[j * 3]! - x;
+          const dz = info.pts[j * 3 + 2]! - z;
+          if (dx * dx + dz * dz > R * R) continue;
+          if (Math.abs(info.pts[j * 3 + 1]! - y) < MIN_VERTICAL) return true;
+        }
+      }
+    // The piece against itself (a spiral over its own turn), more than 30 m apart along it.
+    for (let j = i + Math.ceil(30 / part.ds); j < part.count; j += 2) {
+      const dx = part.pos[j * 3]! - x;
+      const dz = part.pos[j * 3 + 2]! - z;
+      if (dx * dx + dz * dz > R * R) continue;
+      if (Math.abs(part.pos[j * 3 + 1]! - y) < MIN_VERTICAL) return true;
+    }
+  }
+  return false;
+}
+
+const planMemo = new WeakMap<TrackDesign, Map<string, NextPiece>>();
 
 /**
  * Plan the next piece for the current choice without committing anything: the edit-mode ghost.
  * Committing is just using `design` as the new design (one undo step).
  */
 export function planNext(design: TrackDesign, choice: BuildChoice, ground: (x: number, z: number) => number, committed?: BakedTrack | null): NextPiece {
+  // Plans are pure for a given design and choice: reuse them (the panel asks for the same ones often).
+  let memo = planMemo.get(design);
+  if (!memo) planMemo.set(design, (memo = new Map()));
+  const key = `${JSON.stringify(choice)}|${committed ? committed.length.toFixed(2) : '-'}`;
+  const cached = memo.get(key);
+  if (cached) return cached;
+  const result = planNextUncached(design, choice, ground, committed);
+  memo.set(key, result);
+  return result;
+}
+
+function planNextUncached(design: TrackDesign, choice: BuildChoice, ground: (x: number, z: number) => number, committed?: BakedTrack | null): NextPiece {
   const base = opened(design);
+  const info = baseInfo(base);
   const g = gridFrame(base);
   // The group name records what the piece was built as, so it can be changed later in edit mode.
   const group = `${newGroup()}~${encodeChoice(choice)}`;
   const d = cloneDesign(base);
   d.closed = false;
   const start = d.nodes.length;
-  const speed = d.nodes.length >= 2 ? estimateSpeedAtEnd(d, new BakedTrack(d, 0.5)) : 8;
+  const speed = info.speed;
   const headingOf = (dir: readonly number[]) => Math.atan2(-dir[2]!, dir[0]!);
   const floorAt = (x: number, z: number) => ground(x, z) + 1.4;
   const ceilLevel = (y: number) => g.y + Math.ceil((y - g.y) / LEVEL - 1e-6) * LEVEL;
@@ -235,6 +429,7 @@ export function planNext(design: TrackDesign, choice: BuildChoice, ground: (x: n
   let serialId = 0;
   const prefix = () => `${group}_${serialId++}_`;
   let atGround = false;
+  let needsHeight = false;
   // The automatic return always arrives along a straight brake run into the station: treat that
   // approach as existing track, so new track (and elements) keep clear of it.
   const first = d.nodes[0]!;
@@ -256,20 +451,76 @@ export function planNext(design: TrackDesign, choice: BuildChoice, ground: (x: n
       atGround = choice.slope < 0;
       y1 = floor;
     }
+    const climbStart = d.nodes.length - 1;
     push(pathTo(t, target, { y1, radius: choice.turn ? 2 * TILE : 10, speed }, prefix(), group));
+    if (choice.slope > 0 && !atGround) {
+      // Climbs carry a chain (like a park builder's chain-lift slopes): the train never stalls on
+      // the way up, and you hear the ratchet. The chain only ever pulls a slow train up to speed.
+      for (let i = climbStart; i < d.nodes.length - 1; i++) {
+        const n = d.nodes[i]!;
+        if (n.kind === 'track' || n.kind === 'lift') {
+          n.kind = 'lift';
+          n.param = CHAIN_SPEED;
+        }
+      }
+    }
+  } else if (choice.id === 'drop' && tail().p[1] - ground(tail().p[0], tail().p[2]) < 6) {
+    // A drop needs somewhere to drop to: don't force one at ground level.
+    needsHeight = true;
   } else {
-    // 3. A special element, then a short join back onto the grid.
+    // 3. A special element, then a short join back onto the grid. Elements are never bent: if one
+    //    would meet other track, a gentle ramp in front raises the whole element clear.
     const piece = pieceById(choice.id);
-    const made = generate({ ...d, nodes: [approach, ...d.nodes] }, piece, { ...piece.params }, group, ground).design;
-    d.nodes = made.nodes.slice(1);
-    const t = tail();
-    const target = gridTarget(g, { x: t.p[0], z: t.p[2], h: headingOf(t.dir) }, 2, 0, 0);
-    push(pathTo(t, target, { y1: Math.max(snapLevel(g, t.p[1]), ceilLevel(floorAt(target.x, target.z))), radius: 10, speed }, prefix(), group));
+    const preset = presetById(piece.preset);
+    const params: Record<string, number> = { ...preset.defaults, ...piece.params };
+    if (choice.id === 'drop') {
+      // Drop only as far as the ground ahead allows.
+      const t = tail();
+      const h = headingOf(t.dir);
+      let low = ground(t.p[0], t.p[2]);
+      for (let m = 10; m <= 60; m += 10) low = Math.max(low, ground(t.p[0] + Math.cos(h) * m, t.p[2] - Math.sin(h) * m));
+      params.depth = Math.max(4, Math.min(params.depth ?? 15, t.p[1] - low - 2));
+    }
+    if (choice.id === 'helix') {
+      const need = (MIN_VERTICAL + 0.6) * Math.max(1, Math.abs(params.turns ?? 1));
+      if (Math.abs(params.rise ?? 0) < need) params.rise = ((params.rise ?? -1) > 0 ? 1 : -1) * need;
+    }
+    const before = cloneDesign(d);
+    const upright = Math.round(tail().bank / (2 * Math.PI)) * 2 * Math.PI;
+    const ctx = { uprightBank: upright, speedAtEnd: speed, autoBank: true };
+    const cursorOf = (n: TrackNode) => ({ p: [...n.p] as V3, dir: [...n.dir] as V3, bank: n.bank });
+    const build = (rise: number): TrackDesign => {
+      let x = cloneDesign(before);
+      if (rise > 0) x = appendElement(x, presetById('track').make(cursorOf(x.nodes[x.nodes.length - 1]!), { length: Math.max(18, rise / MAX_GRADE), turn: 0, rise, bank: 0 }, ctx), group);
+      x = appendElement(x, preset.make(cursorOf(x.nodes[x.nodes.length - 1]!), params, ctx), group);
+      const t = x.nodes[x.nodes.length - 1]!;
+      const target = gridTarget(g, { x: t.p[0], z: t.p[2], h: headingOf(t.dir) }, 2, 0, 0);
+      for (const n of pathTo(t, target, { y1: Math.max(snapLevel(g, t.p[1]), ceilLevel(floorAt(target.x, target.z))), radius: 10, speed }, prefix(), group)) x.nodes.push(n);
+      liftAboveGround(x, start, ground);
+      return x;
+    };
+    let chosen: TrackDesign | null = null;
+    for (const rise of [0, 6, 12, 18]) {
+      const cand = build(rise);
+      chosen ??= cand;
+      const partC = new BakedTrack({ ...cand, closed: false, nodes: cand.nodes.slice(Math.max(0, start - 1)) }, 0.5);
+      if (!fastConflicts(info, partC)) {
+        chosen = cand;
+        break;
+      }
+    }
+    d.nodes = chosen!.nodes;
   }
   liftAboveGround(d, start, ground);
   // Never through other track: simple track (including joins) is lifted smoothly over crossings;
-  // loops, rolls and other elements are never bent.
-  separateCrossings({ ...d, nodes: [approach, ...d.nodes] }, start + 1, ground);
+  // loops, rolls and other elements are never bent. (The full check only runs when the quick one
+  // finds something close.)
+  const bakePart = () => new BakedTrack({ ...d, closed: false, nodes: d.nodes.slice(Math.max(0, start - 1)) }, 0.5);
+  let part = d.nodes.length > start ? bakePart() : null;
+  if (part && fastConflicts(info, part)) {
+    separateCrossings({ ...d, nodes: [approach, ...d.nodes] }, start + 1, ground);
+    part = bakePart();
+  }
   const r = { design: d, active: { start } };
   const nodes = d.nodes;
   const end = nodes[nodes.length - 1]!;
@@ -298,7 +549,18 @@ export function planNext(design: TrackDesign, choice: BuildChoice, ground: (x: n
       }
     }
   }
-  return { design: r.design, start: r.active.start, height, atGround, crossing };
+  let blocked = needsHeight ? 'Needs height first: add an Up piece or a Lift' : roughness(d, start, choice);
+  // Final guarantees: never into other track (including the station approach), never into the ground.
+  if (!blocked && part && fastConflicts(info, part)) blocked = 'Would run into other track here. Try another direction, or go up or down first';
+  if (!blocked && minClearance(d, start, ground) < 0.8) blocked = 'Too close to the ground here. Try going up first';
+  // Will the train make it? Loops and rolls need speed; a gentle climb needs a little too. The
+  // walk carries on from the speed the train arrives at the end of the existing track.
+  if (!blocked && part) {
+    const e = energyWalk(part, d.style === 'wood' ? 1.55 : d.style === 'mine' ? 1.3 : 1, 0, info.stalled ? 0.7 : info.vEnd);
+    const what = choice.kind === 'special' ? pieceById(choice.id).label.toLowerCase() : 'climb';
+    if (e.stallS !== null || e.minV < 1.5 || e.minVInverted < 5) blocked = `The train won't have enough speed for this ${what}. Add a Lift or a Launch first, or go down before it`;
+  }
+  return { design: r.design, start: r.active.start, height, atGround, crossing, blocked };
 }
 
 /** Where to draw the building grid: the grid frame and the snapped end of the track. */

@@ -79,9 +79,13 @@ export interface GameState {
     dropped: number;
     /** The choice this ghost was planned for (so tools can tell when it has caught up). */
     forChoice: string;
+    /** Why this choice can't be built smoothly here, if it can't. */
+    blocked: string | null;
   } | null;
   /** Edit mode: the selected piece (its group), or null when adding to the end. */
   editSel: string | null;
+  /** Edit mode: which options fit smoothly where you are building (others are hidden). */
+  avail: { specials: string[]; down: Record<string, boolean>; note: string | null } | null;
   /** Decorate mode eraser. */
   eraser: boolean;
   /** Paint mode sub-tab. */
@@ -167,6 +171,7 @@ export const useGame = create<GameState & GameActions>()((set, get) => ({
   buildChoice: DEFAULT_CHOICE,
   ghost: null,
   editSel: null,
+  avail: null,
   eraser: false,
   paintTab: 'track',
   sheetCompact: false,

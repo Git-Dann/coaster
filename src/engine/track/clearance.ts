@@ -13,6 +13,7 @@ import type { TrackDesign } from './types';
 export const MIN_VERTICAL = 5.5;
 /** Track centres closer than this in plan view count as the same space (train width plus margin). */
 export const PLAN_RADIUS = 2.6;
+const DETECT_RADIUS = PLAN_RADIUS + 0.7;
 const WINDOW = 28;
 
 interface Conflict {
@@ -83,7 +84,8 @@ export function findClashes(design: TrackDesign, fromIndex: number, ground: (x: 
           if (arcSep(si, sj, baked) < minArc) continue;
           const dx = baked.pos[j * 3]! - x;
           const dz = baked.pos[j * 3 + 2]! - z;
-          if (dx * dx + dz * dz > PLAN_RADIUS * PLAN_RADIUS) continue;
+          // Samples are 1 m apart, so a crossing at an angle can fall between them: detect with a margin.
+          if (dx * dx + dz * dz > DETECT_RADIUS * DETECT_RADIUS) continue;
           const yj = baked.pos[j * 3 + 1]!;
           if (Math.abs(y - yj) >= MIN_VERTICAL) continue;
           // Decide which point moves: only new, unprotected track moves; prefer the later one.
@@ -142,7 +144,7 @@ export function separateCrossings(design: TrackDesign, fromIndex: number, ground
       const wrapped = Math.atan2(Math.sin(n.bank), Math.cos(n.bank));
       // (The automatic return has no elements, only its own slopes, so it may bend steep track.)
       const complex = (!bendSteep && Math.abs(n.dir[1]) > 0.6) || Math.abs(wrapped) > 1.2;
-      if (lift !== 0 && !complex) n.p[1] += lift * 1.08;
+      if (lift !== 0 && !complex) n.p[1] = Math.max(n.p[1] + lift * 1.08, ground(n.p[0], n.p[2]) + 1.3);
     }
     // Keep slopes consistent with the new heights.
     for (let i = fromIndex; i < last; i++) {
