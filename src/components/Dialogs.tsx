@@ -460,7 +460,11 @@ export function RelaxOverlay() {
     <button
       className={`cc-relax${show ? ' show' : ''}`}
       onPointerMove={() => setShow(true)}
-      onClick={() => useGame.setState({ overlay: 'none', camera: 'orbit' })}
+      onClick={() => {
+        useGame.setState({ overlay: 'none', camera: 'orbit' });
+        // Come back to a view of the whole coaster, not wherever the drifting camera ended up.
+        requestAnimationFrame(() => services.engine?.frameCoaster());
+      }}
       aria-label="Leave relax mode"
     >
       <Icon name="close" size={18} /> <span>Leave relax mode</span>

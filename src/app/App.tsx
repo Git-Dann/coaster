@@ -59,8 +59,55 @@ export function App() {
     void boot();
     const ro = new ResizeObserver(() => services.engine?.resize());
     ro.observe(canvas);
+    // Tell the camera which parts of the screen the controls cover, so it aims at the clear area.
+    const measureInsets = () => {
+      const e = services.engine;
+      if (!e) return;
+      const c = canvas.getBoundingClientRect();
+      const top = document.querySelector('.cc-top')?.getBoundingClientRect();
+      const rect = (sel: string) => {
+        const el = document.querySelector(sel);
+        const r = el?.getBoundingClientRect();
+        return r && r.width > 0 && r.height > 0 ? r : null;
+      };
+      const tray = rect('.cc-tray');
+      const nav = rect('.cc-nav');
+      const lever = rect('.cc-lever');
+      let bottom = nav ? c.bottom - nav.top : 0;
+      let left = 0;
+      if (tray && tray.width > c.width * 0.6) bottom = c.bottom - tray.top; // phone: sheet across the bottom
+      else if (tray && tray.left < c.width * 0.2 && tray.height > c.height * 0.4) left = tray.right - c.left; // landscape: sheet on the left
+      else if (tray) bottom = Math.max(bottom, c.bottom - tray.top); // desktop: sheet above the nav
+      e.setViewInsets(top ? top.bottom - c.top : 0, bottom, left, lever ? c.right - lever.left : 0);
+    };
+    const insetObserver = new ResizeObserver(measureInsets);
+    const watchInsets = window.setInterval(() => {
+      // The dock and top bar mount after boot and change as sheets open: (re)observe them.
+      for (const sel of ['.cc-top', '.cc-dock']) {
+        const el = document.querySelector(sel);
+        if (el && !(el as HTMLElement).dataset.insetObserved) {
+          (el as HTMLElement).dataset.insetObserved = '1';
+          insetObserver.observe(el);
+        }
+      }
+      measureInsets();
+    }, 500);
+    // Keep the page and browser-bar colour in step with the sky (no per-frame work: every 2 s).
+    let lastBg = '';
+    const bgTimer = window.setInterval(() => {
+      const e = services.engine;
+      if (!e) return;
+      const hex = `#${e.atmosphere.fog.color.getHexString()}`;
+      if (hex === lastBg) return;
+      lastBg = hex;
+      document.documentElement.style.setProperty('--scene-bg', hex);
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', hex);
+    }, 2000);
     return () => {
       cancelled = true;
+      window.clearInterval(bgTimer);
+      window.clearInterval(watchInsets);
+      insetObserver.disconnect();
       ro.disconnect();
       disposeStore();
       disposeSaves();

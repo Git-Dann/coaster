@@ -7,8 +7,8 @@ import { services } from './services';
  * - iOS Safari only lets audio start inside certain gestures (touchend / click / keydown),
  *   not pointerdown, so we listen for those on the whole document.
  * - iOS mutes Web Audio when the ringer switch is on silent unless the page declares a playback
- *   audio session. Safari 17+ supports `navigator.audioSession`; for older versions, briefly
- *   playing a silent HTML audio element switches the session to playback.
+ *   audio session. Safari 17+ supports `navigator.audioSession`, which is all we use there; only
+ *   older versions get a looping silent HTML audio element to switch the session to playback.
  * - Music starts once audio is unlocked if the music volume is above zero.
  */
 let unlocked = false;
@@ -39,9 +39,12 @@ function silentWavUrl(): string {
 function playbackSession(): void {
   const nav = navigator as Navigator & { audioSession?: { type: string } };
   try {
-    if (nav.audioSession) nav.audioSession.type = 'playback';
+    if (nav.audioSession) {
+      nav.audioSession.type = 'playback';
+      return; // Safari 17+: no silent HTML audio needed
+    }
   } catch {
-    /* not supported */
+    /* not supported: fall back below */
   }
   try {
     if (!silent) {

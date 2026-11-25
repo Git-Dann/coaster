@@ -37,7 +37,9 @@ test('launches straight into the world with a working starter coaster', async ({
   expect(size).toBeGreaterThan(50_000);
   const s0 = await page.evaluate(() => (window as any).__cozy.engine.sim.s);
   await page.getByRole('button', { name: 'Take a ride' }).click();
-  await page.waitForTimeout(4000);
+  // The train must get moving. Simulation time is bounded per frame, so on CI's CPU renderer it runs
+  // slower than wall time: wait for the movement instead of a fixed number of seconds.
+  await page.waitForFunction((start) => Math.abs((window as any).__cozy.engine.sim.s - start) > 1, s0, { timeout: 30_000 });
   const s1 = await page.evaluate(() => (window as any).__cozy.engine.sim.s);
   expect(Math.abs(s1 - s0)).toBeGreaterThan(1);
   await page.screenshot({ path: `test-results/visual/${test.info().project.name}-ride.png` });
@@ -113,6 +115,8 @@ test('a two-finger pinch moves the camera and never builds', async ({ page }) =>
 });
 
 test('carriages change at any time, even mid-ride; timber, rain and riding all work', async ({ page }) => {
+  // Many steps (paint, supports, rain, ride, sheet open/close) on CI's CPU renderer.
+  test.setTimeout(180_000);
   await page.goto('/');
   await ready(page);
   await page.getByRole('button', { name: 'Explore the meadow' }).click();
@@ -132,7 +136,16 @@ test('carriages change at any time, even mid-ride; timber, rain and riding all w
   await expect.poll(() => page.evaluate(() => (window as any).__cozy.engine.atmosphere.state.rain), { timeout: 15_000 }).toBeGreaterThan(0.3);
   await page.getByRole('button', { name: 'Ride', exact: true }).click();
   await page.getByRole('button', { name: 'Ride!' }).click();
-  expect(await page.evaluate(() => (window as any).__cozy.store.getState().camera)).toBe('front');
+  const cam = () => page.evaluate(() => (window as any).__cozy.store.getState().camera);
+  expect(await cam()).toBe('front');
+  // Riding puts the sheet away for a clear view; opening and closing it never ends the ride.
+  await expect(page.getByRole('button', { name: 'Ride!' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Ride', exact: true }).click();
+  await page.getByRole('button', { name: 'Watch' }).click();
+  expect(await cam()).not.toBe('orbit');
+  await page.getByRole('button', { name: 'Ride', exact: true }).click();
+  await page.getByRole('button', { name: 'Ride', exact: true }).click();
+  expect(await cam()).not.toBe('orbit');
   await page.waitForTimeout(2500);
   await page.screenshot({ path: `test-results/visual/${test.info().project.name}-rain-six-cars.png` });
 });
@@ -183,7 +196,8 @@ test('recovers from WebGL context loss without losing the world', async ({ page 
 });
 
 test('seeded visual scenes render without errors', async ({ page }) => {
-  test.setTimeout(360_000);
+  // Six full-quality scenes on CI's CPU renderer: ~4 min on a typical runner, twice that on a slow one.
+  test.setTimeout(720_000);
   await page.goto('/');
   await ready(page, true);
   await page.getByRole('button', { name: 'Explore the meadow' }).click();

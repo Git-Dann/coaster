@@ -29,7 +29,7 @@ export class CameraRig {
   private sYaw = -0.55;
   private sPitch = 0.3;
   minDistance = 6;
-  maxDistance = 420;
+  maxDistance = 700;
   /** Comfort: 0 = full banking, 1 = horizon locked. */
   stabilisation = 0.35;
   reducedMotion = false;

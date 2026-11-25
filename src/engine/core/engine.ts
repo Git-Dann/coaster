@@ -459,10 +459,44 @@ export class Engine {
     this.loop.reset();
   }
 
+  /** Screen space covered by the interface (top bar, build sheet, nav), in CSS pixels. */
+  private insets = { top: 0, bottom: 0, left: 0, right: 0 };
+  private appliedOffset = NaN;
+  private appliedOffsetX = NaN;
+  /**
+   * Tell the camera which parts of the screen the controls cover. Overview cameras then centre
+   * what they look at in the clear area between them, instead of behind the build sheet.
+   */
+  setViewInsets(top: number, bottom: number, left = 0, right = 0): void {
+    this.insets = { top: Math.max(0, top), bottom: Math.max(0, bottom), left: Math.max(0, left), right: Math.max(0, right) };
+  }
+
+  /** Shift the projection so the camera's aim point sits in the middle of the clear area. */
+  private applyViewOffset(): void {
+    const cam = this.rig.camera;
+    const w = Math.max(1, this.canvas.clientWidth);
+    const h = Math.max(1, this.canvas.clientHeight);
+    const overview = this.rig.mode === 'orbit' || this.rig.mode === 'relax';
+    // Ease towards the target offset so opening or closing a sheet glides rather than jumps.
+    const ty = overview ? Math.round((this.insets.bottom - this.insets.top) / 2) : 0;
+    const tx = overview ? Math.round((this.insets.right - this.insets.left) / 2) : 0;
+    const cy = Number.isFinite(this.appliedOffset) ? this.appliedOffset : ty;
+    const cx = Number.isFinite(this.appliedOffsetX) ? this.appliedOffsetX : tx;
+    const ny = Math.abs(ty - cy) < 0.5 ? ty : cy + (ty - cy) * 0.15;
+    const nx = Math.abs(tx - cx) < 0.5 ? tx : cx + (tx - cx) * 0.15;
+    if (ny === this.appliedOffset && nx === this.appliedOffsetX) return;
+    this.appliedOffset = ny;
+    this.appliedOffsetX = nx;
+    if (Math.abs(ny) < 0.5 && Math.abs(nx) < 0.5) cam.clearViewOffset();
+    else cam.setViewOffset(w, h, nx, ny, w, h);
+  }
+
   /** Smoothly move the build camera to look at a point, keeping the current zoom. */
   lookAt(p: V3): void {
     if (this.rig.mode !== 'orbit') return;
-    this.rig.focusOn(new THREE.Vector3(p[0], p[1] - 2, p[2]), Math.max(this.rig.distance, 45));
+    // The view offset centres the point in the clear area; keep a distance that shows the
+    // surroundings without the newest piece becoming a speck.
+    this.rig.focusOn(new THREE.Vector3(p[0], p[1], p[2]), THREE.MathUtils.clamp(this.rig.distance, 45, 85));
   }
 
   frameCoaster(): void {
@@ -471,24 +505,78 @@ export class Engine {
     if (this.design && this.design.nodes.length <= 3 && !this.design.closed) {
       // A fresh coaster: look at the open end where building happens.
       const end = this.design.nodes[this.design.nodes.length - 1]!;
-      // Aim a little below the end so the handles sit in the upper-middle, clear of the build sheet.
       const portrait = this.canvas.clientWidth < this.canvas.clientHeight;
-      this.rig.focusOn(new THREE.Vector3(end.p[0], end.p[1] - (portrait ? 11 : 4), end.p[2]), portrait ? 48 : 40);
+      this.rig.focusOn(new THREE.Vector3(end.p[0], end.p[1], end.p[2]), portrait ? 52 : 42);
       this.rig.yaw = -0.9;
       this.rig.pitch = 0.36;
       return;
     }
-    const box = new THREE.Box3();
-    for (let i = 0; i < t.count; i += 8) box.expandByPoint(this.tmp.set(t.pos[i * 3]!, t.pos[i * 3 + 1]!, t.pos[i * 3 + 2]!));
+    // Sample the circuit, find its centre and its long direction in plan view.
+    const pts: THREE.Vector3[] = [];
+    for (let i = 0; i < t.count; i += 8) pts.push(new THREE.Vector3(t.pos[i * 3]!, t.pos[i * 3 + 1]!, t.pos[i * 3 + 2]!));
+    const box = new THREE.Box3().setFromPoints(pts);
     const c = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3()).length();
-    // Narrow (portrait) screens need to stand further back to fit the coaster's width.
-    const aspect = this.canvas.clientWidth / Math.max(1, this.canvas.clientHeight);
-    if (aspect < 1) {
-      // Portrait: look down a little more steeply so the coaster's length fits the tall screen.
-      this.rig.pitch = 0.62;
-      this.rig.focusOn(c.add(new THREE.Vector3(0, -6, 0)), Math.max(30, size * 0.85 * 1.15));
-    } else this.rig.focusOn(c, Math.max(30, size * 0.85));
+    let sxx = 0;
+    let szz = 0;
+    let sxz = 0;
+    for (const p of pts) {
+      const dx = p.x - c.x;
+      const dz = p.z - c.z;
+      sxx += dx * dx;
+      szz += dz * dz;
+      sxz += dx * dz;
+    }
+    const axis = 0.5 * Math.atan2(2 * sxz, sxx - szz); // angle of the long axis from +x
+    const ux = Math.cos(axis);
+    const uz = Math.sin(axis);
+    const w = Math.max(1, this.canvas.clientWidth);
+    const h = Math.max(1, this.canvas.clientHeight);
+    const portrait = w < h;
+    // Portrait screens are tall: look along the long axis so it runs up the screen. Wide screens
+    // look across it. Of the two opposite views, keep the one nearest the current view.
+    let yaw = Math.atan2(ux, uz) + (portrait ? 0 : Math.PI / 2);
+    const near = (a: number) => Math.abs(Math.atan2(Math.sin(a - this.rig.yaw), Math.cos(a - this.rig.yaw)));
+    if (near(yaw + Math.PI) < near(yaw)) yaw += Math.PI;
+    const pitch = portrait ? 0.62 : Math.max(0.42, this.rig.pitch);
+    // Find the closest distance at which every sampled point lands inside the clear area.
+    const cam = this.rig.camera.clone();
+    cam.aspect = w / h;
+    const oy = Math.round((this.insets.bottom - this.insets.top) / 2);
+    const ox = Math.round((this.insets.right - this.insets.left) / 2);
+    if (oy || ox) cam.setViewOffset(w, h, ox, oy, w, h);
+    else cam.clearViewOffset();
+    cam.updateProjectionMatrix();
+    const m = Math.min(w, h) * 0.06;
+    const left = this.insets.left + m;
+    const right = w - this.insets.right - m;
+    const top = this.insets.top + m;
+    const bottom = h - this.insets.bottom - m;
+    const v = new THREE.Vector3();
+    const fits = (d: number) => {
+      const cp = Math.cos(pitch);
+      cam.position.set(c.x + Math.sin(yaw) * cp * d, c.y + Math.sin(pitch) * d, c.z + Math.cos(yaw) * cp * d);
+      cam.up.set(0, 1, 0);
+      cam.lookAt(c);
+      cam.updateMatrixWorld();
+      for (const p of pts) {
+        v.copy(p).project(cam);
+        const sx = ((v.x + 1) / 2) * w;
+        const sy = ((1 - v.y) / 2) * h;
+        if (v.z > 1 || sx < left || sx > right || sy < top || sy > bottom) return false;
+      }
+      return true;
+    };
+    let lo = 25;
+    let hi = this.rig.maxDistance;
+    if (fits(lo)) hi = lo;
+    else for (let k = 0; k < 18; k++) {
+      const mid = (lo + hi) / 2;
+      if (fits(mid)) hi = mid;
+      else lo = mid;
+    }
+    this.rig.yaw = yaw;
+    this.rig.pitch = pitch;
+    this.rig.focusOn(c, hi);
   }
 
   // ---------------------------------------------------------------- picking
@@ -690,6 +778,7 @@ export class Engine {
 
     // Camera.
     this.rig.update(dt, this.train.leadMatrix, this.train.rearMatrix, this.sim.v, (x, z) => this.terrain.heightAt(x, z));
+    this.applyViewOffset();
     const cam = this.rig.camera;
     const focus = this.rig.mode === 'orbit' || this.rig.mode === 'relax' ? this.rig.target : cam.position;
     this.velocity.subVectors(focus, this.lastFocus).divideScalar(Math.max(dt, 1e-3));
@@ -702,6 +791,9 @@ export class Engine {
     const supportsMoving = this.supports.update(dt);
 
     // Atmosphere and weather.
+    // Pulling far back to see a big coaster must not bury it in haze: thin the fog with distance.
+    const viewDist = this.rig.mode === 'orbit' || this.rig.mode === 'relax' ? this.rig.distance * 3.2 : 0;
+    this.atmosphere.baseFog = 1.25 / Math.max(this.terrain.drawDistance, 620, viewDist);
     this.atmosphere.update(dt, this.elapsed, focus);
     const st = this.atmosphere.state;
     this.vegetation.uniforms.uWind.value = 0.45 + st.rain * 0.5 + st.cloud * 0.2;
@@ -727,7 +819,7 @@ export class Engine {
     // Audio.
     this.updateAudio(dt, supportsMoving);
 
-    this.painterly.render(this.renderer, this.scene, cam, this.elapsed, this.atmosphere.horizon, Math.max(this.terrain.drawDistance, 650));
+    this.painterly.render(this.renderer, this.scene, cam, this.elapsed, this.atmosphere.horizon, Math.max(this.terrain.drawDistance, 650, viewDist));
 
     // Performance bookkeeping.
     this.cpuMs = performance.now() - t0;

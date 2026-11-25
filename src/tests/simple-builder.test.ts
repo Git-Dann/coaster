@@ -8,6 +8,30 @@ import { Heightfield, PAD_HEIGHT } from '../engine/terrain/heightfield';
 import { mulberry32 } from '../engine/terrain/noise';
 import { PIECES, addPiece, adjustPiece, freshCoaster, removePiece, type PieceId } from '../features/builder/simple-builder';
 import { cfg } from './physics/helpers';
+import { MIN_VERTICAL } from '../engine/track/clearance';
+
+/** Every pair of track points far apart along the circuit but close in plan must be vertically separated. */
+function worstClash(track: BakedTrack): { gap: number; s1: number; s2: number } {
+  let worst = { gap: Infinity, s1: 0, s2: 0 };
+  const step = 4; // 1 m
+  const idx: number[] = [];
+  for (let i = 0; i < track.count; i += step) idx.push(i);
+  for (let a = 0; a < idx.length; a++) {
+    for (let b = a + 1; b < idx.length; b++) {
+      const i = idx[a]!;
+      const j = idx[b]!;
+      let ds = Math.abs(i - j) * track.ds;
+      if (track.closed) ds = Math.min(ds, track.length - ds);
+      if (ds < 40) continue;
+      const dx = track.pos[i * 3]! - track.pos[j * 3]!;
+      const dz = track.pos[i * 3 + 2]! - track.pos[j * 3 + 2]!;
+      if (dx * dx + dz * dz > 2.5 * 2.5) continue;
+      const gap = Math.abs(track.pos[i * 3 + 1]! - track.pos[j * 3 + 1]!);
+      if (gap < worst.gap) worst = { gap, s1: i * track.ds, s2: j * track.ds };
+    }
+  }
+  return worst;
+}
 
 const hf = new Heightfield('meadow', 2026);
 const ground = (x: number, z: number) => hf.height(x, z);
@@ -49,6 +73,7 @@ describe('the track can never be left disconnected', () => {
     expect(track.diagnostics.maxGap).toBeLessThan(1e-9);
     expect(track.diagnostics.seamFlip).toBe(false);
     expect(1 / track.diagnostics.maxCurvature).toBeGreaterThan(3);
+    expect(worstClash(track).gap).toBeGreaterThanOrEqual(MIN_VERTICAL - 0.6);
     const sim = new TrainSim(track, cfg(6), { ...DEFAULT_PHYSICS });
     let arrivals = 0;
     for (let i = 0; i < 120 * 200; i++) {
@@ -83,6 +108,13 @@ describe('the track can never be left disconnected', () => {
       expect(track.diagnostics.maxGap).toBeLessThan(1e-6);
       expect(track.diagnostics.seamFlip, `trial ${trial}`).toBe(false);
       for (let i = 0; i < track.pos.length; i++) expect(Number.isFinite(track.pos[i]!)).toBe(true);
+      // No two parts of the coaster may ever share the same space.
+      const clash = worstClash(track);
+      expect(clash.gap, `trial ${trial} clash at ${clash.s1.toFixed(0)}/${clash.s2.toFixed(0)} m`).toBeGreaterThanOrEqual(MIN_VERTICAL - 0.6);
+      // Banking never spins faster than a roll element (no hidden unwinding twists between pieces).
+      let twist = 0;
+      for (let i = 1; i < track.count; i++) twist = Math.max(twist, Math.abs(track.bank[i]! - track.bank[i - 1]!) / track.ds);
+      expect(twist, `trial ${trial} twist rate`).toBeLessThan(0.6);
       // The train always behaves: it may stall on a layout without enough energy, but never errors.
       const sim = new TrainSim(track, cfg(4), { ...DEFAULT_PHYSICS });
       sim.dispatch();
@@ -94,6 +126,17 @@ describe('the track can never be left disconnected', () => {
     }
     // 40 layouts × 40 s of simulation: allow time when the suite runs in parallel.
   }, 60_000);
+});
+
+describe('regressions found by playtesting', () => {
+  test('left, hill, loop, right on a fresh coaster: the return never threads through the loop', () => {
+    let d = freshCoaster(starterPlayable(PAD_HEIGHT + 1), PAD_HEIGHT + 1, ground);
+    for (const id of ['left', 'hill', 'loop', 'right'] as const) d = addPiece(d, id, ground).design;
+    for (const speed of [8, 12, 16, 20, 24]) {
+      const t = new BakedTrack(withReturn(d, { groundAt: ground, speed }));
+      expect(worstClash(t).gap, `speed ${speed}`).toBeGreaterThanOrEqual(MIN_VERTICAL - 0.6);
+    }
+  });
 });
 
 describe('tap-to-add building', () => {
@@ -118,9 +161,53 @@ describe('tap-to-add building', () => {
     expect(d.nodes[0]!.kind).toBe('station');
   });
 
+  test('the height lever makes gentle ramps, never spikes or holes', () => {
+    const d0 = starterPlayable(PAD_HEIGHT + 1);
+    const r = addPiece(d0, 'straight', ground);
+    for (const rise of [-30, -10, 10, 30]) {
+      const a = adjustPiece(r.design, r.active, { rise }, ground)!;
+      const nodes = a.design.nodes.slice(r.active.start - 1);
+      const t = new BakedTrack({ ...a.design, nodes, closed: false });
+      for (let i = 0; i < t.count; i++) expect(Math.abs(t.tan[i * 3 + 1]!), `rise ${rise}`).toBeLessThan(Math.sin((32 * Math.PI) / 180));
+      for (const n of nodes) expect(n.p[1]).toBeGreaterThanOrEqual(ground(n.p[0], n.p[2]) + 1.0);
+      // The lever shows the height the track really reached.
+      const end = nodes[nodes.length - 1]!.p[1];
+      expect(Math.abs(end - nodes[0]!.p[1] - a.active.params.rise!)).toBeLessThan(1.5);
+    }
+  });
+
+  test('the automatic return never spikes, whatever the lever and speed', () => {
+    const r = addPiece(starterPlayable(PAD_HEIGHT + 1), 'straight', ground);
+    for (let rise = -30; rise <= 30; rise += 3) {
+      const a = adjustPiece(r.design, r.active, { rise }, ground)!;
+      const top = Math.max(...a.design.nodes.map((n) => n.p[1]));
+      for (const speed of [8, 12, 16, 20, 24]) {
+        const c = withReturn(a.design, { groundAt: ground, speed });
+        const t = new BakedTrack(c);
+        let maxY = -Infinity;
+        for (let i = 0; i < t.count; i++) maxY = Math.max(maxY, t.pos[i * 3 + 1]!);
+        expect(maxY, `rise ${rise} speed ${speed}`).toBeLessThan(top + MIN_VERTICAL + 3);
+        for (let i = 1; i < c.nodes.length; i++) {
+          const p0 = c.nodes[i - 1]!.p;
+          const p1 = c.nodes[i]!.p;
+          expect(Math.hypot(p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]), `rise ${rise} speed ${speed} node ${i}`).toBeGreaterThan(0.75);
+        }
+      }
+    }
+  }, 60_000);
+
   test('pieces never go underground', () => {
     let d = starterPlayable(PAD_HEIGHT + 1);
     for (let i = 0; i < 4; i++) d = addPiece(d, 'down', ground).design;
     for (const node of d.nodes) expect(node.p[1]).toBeGreaterThanOrEqual(ground(node.p[0], node.p[2]) + 1.0);
+  });
+
+  test('a deepened drop or spiral never dips into the ground, even between nodes', () => {
+    for (const [id, patch] of [['drop', { depth: 60 }], ['helix', { rise: -25 }], ['down', { rise: -30 }]] as const) {
+      const r = addPiece(starterPlayable(PAD_HEIGHT + 1), id, ground);
+      const a = adjustPiece(r.design, r.active, patch, ground)!;
+      const t = new BakedTrack({ ...a.design, closed: false, nodes: a.design.nodes.slice(r.active.start - 1) }, 0.5);
+      for (let i = 0; i < t.count; i++) expect(t.pos[i * 3 + 1]! - ground(t.pos[i * 3]!, t.pos[i * 3 + 2]!), id).toBeGreaterThan(0.5);
+    }
   });
 });
