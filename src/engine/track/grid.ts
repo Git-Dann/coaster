@@ -27,8 +27,14 @@ const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 
 /** The grid for a design: anchored at the last station node. */
 export function gridFrame(design: Pick<TrackDesign, 'nodes'>): GridFrame {
+  // The grid starts where your own building starts: the end of the station, or of the track the
+  // coaster came with, so the first piece you add carries straight on (no sideways jog to reach a
+  // grid that's out of line with it). Pieces built in edit mode carry a '~' in their group name.
   let anchor = design.nodes[0]!;
-  for (const n of design.nodes) if (n.group === 'station') anchor = n;
+  for (const n of design.nodes) {
+    if (n.group?.includes('~')) break;
+    anchor = n;
+  }
   return { x: anchor.p[0], z: anchor.p[2], h: headingOf(anchor.dir), y: anchor.p[1] };
 }
 
@@ -69,7 +75,7 @@ export function snapLevel(g: GridFrame, y: number): number {
 export function onGrid(g: GridFrame, p: V3, dir: V3): boolean {
   const s = snapPoint(g, p[0], p[2]);
   const h = headingOf(dir);
-  return Math.hypot(s.x - p[0], s.z - p[2]) < 0.05 && Math.abs(wrap(h - snapHeading(g, h))) < 1e-3 && Math.abs(dir[1]) < 0.05;
+  return Math.hypot(s.x - p[0], s.z - p[2]) < 0.05 && Math.abs(wrap(h - snapHeading(g, h))) < 1e-3 && Math.abs(dir[1]) < 0.3; // a slope may carry on through the join
 }
 
 export interface PathOptions {
@@ -96,8 +102,9 @@ export function pathTo(start: { p: V3; dir: V3; bank: number }, target: Pose, op
   if (total < 0.5) return [];
   const y0 = start.p[1];
   const startPitch = Math.asin(Math.max(-1, Math.min(1, start.dir[1])));
-  // Bank for the speed, but gently: never past 40°, and less on short arcs (a small joining bend).
-  const bankFor = (arc: number) => Math.min(0.7, (Math.abs(autoBank(90, R, opt.speed)) * Math.PI) / 180) * Math.min(1, arc / (Math.PI / 2));
+  // Bank for the speed (up to 60° for a fast train in a tight turn, so riders aren't thrown
+  // sideways), and less on short arcs (a small joining bend).
+  const bankFor = (arc: number) => Math.min(1.05, (Math.abs(autoBank(90, R, opt.speed)) * Math.PI) / 180) * Math.min(1, arc / (Math.PI / 2));
   // Keep the bank on the same winding as the start (after rolls it can carry whole turns).
   const wind = Math.round(start.bank / (2 * Math.PI)) * 2 * Math.PI;
   const out: TrackNode[] = [];

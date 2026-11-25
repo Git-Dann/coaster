@@ -218,8 +218,11 @@ function trunk(height: number, r0: number, r1: number, colour: string, forks: nu
   return parts;
 }
 
-export function pineGeometry(foliage: THREE.Color, foliageAlt: THREE.Color): Geo {
-  const parts: Geo[] = trunk(2.4, 0.26, 0.15, '#6A4E3E', 0, 1);
+/** Pine. `variant`: 0 classic, 1 tall and slim, 2 short and broad. */
+export function pineGeometry(foliage: THREE.Color, foliageAlt: THREE.Color, variant = 0): Geo {
+  const wide = variant === 1 ? 0.78 : variant === 2 ? 1.25 : 1;
+  const tall = variant === 1 ? 1.25 : variant === 2 ? 0.82 : 1;
+  const parts: Geo[] = trunk(2.4 * tall, 0.26, 0.15, '#6A4E3E', 0, 1 + variant);
   // Pines are cooler and deeper than broadleaves.
   const deep = foliage.clone().multiplyScalar(0.85);
   deep.b *= 1.12;
@@ -230,7 +233,7 @@ export function pineGeometry(foliage: THREE.Color, foliageAlt: THREE.Color): Geo
     { y: 4.1, r: 1.45, h: 2.0 },
     { y: 5.2, r: 1.05, h: 1.7 },
     { y: 6.15, r: 0.62, h: 1.4 },
-  ];
+  ].map((t) => ({ y: t.y * tall, r: t.r * wide, h: t.h * tall }));
   tiers.forEach((t, i) => {
     const pts: THREE.Vector2[] = [new THREE.Vector2(0.01, -0.15)];
     for (let k = 0; k <= 6; k++) {
@@ -272,17 +275,39 @@ export function pineGeometry(foliage: THREE.Color, foliageAlt: THREE.Color): Geo
   return mergeGeometries(parts)!;
 }
 
-export function oakGeometry(foliage: THREE.Color, foliageAlt: THREE.Color): Geo {
-  const parts: Geo[] = trunk(2.8, 0.36, 0.2, '#6E5040', 3, 2);
+/**
+ * Oak. `variant` gives differently shaped trees for scenery the player places (0 is the classic
+ * round oak used across the landscape; 1 is taller and narrower; 2 is broad with a split crown).
+ */
+export function oakGeometry(foliage: THREE.Color, foliageAlt: THREE.Color, variant = 0): Geo {
   const ramp = foliageRamp(foliage, foliageAlt);
+  if (variant === 1) {
+    const parts: Geo[] = trunk(3.6, 0.32, 0.18, '#6A4C3C', 2, 7);
+    const leaves = mergeGeometries(crown(0, 5.0, 0, 1.75, 2.0, 1.7, 12, 0.95, 61))!;
+    parts.push(painted(leaves, foliagePaint(ramp, 3.0, 7.0, 5), swayAbove(2.8, 4)));
+    return mergeGeometries(parts)!;
+  }
+  if (variant === 2) {
+    const parts: Geo[] = trunk(2.4, 0.42, 0.24, '#735443', 4, 11);
+    const leaves = mergeGeometries([...crown(-0.9, 3.7, 0.2, 1.9, 1.3, 1.8, 9, 1.0, 71), ...crown(1.0, 3.9, -0.3, 1.8, 1.35, 1.7, 9, 1.0, 83)])!;
+    parts.push(painted(leaves, foliagePaint(ramp, 2.2, 5.4, 7), swayAbove(2.0, 4)));
+    return mergeGeometries(parts)!;
+  }
+  const parts: Geo[] = trunk(2.8, 0.36, 0.2, '#6E5040', 3, 2);
   const leaves = mergeGeometries(crown(0, 4.1, 0, 2.3, 1.55, 2.2, 11, 1.05, 21))!;
   parts.push(painted(leaves, foliagePaint(ramp, 2.4, 5.8, 3), swayAbove(2.2, 4)));
   return mergeGeometries(parts)!;
 }
 
-export function birchGeometry(foliage: THREE.Color, foliageAlt: THREE.Color): Geo {
+/** Birch. `variant`: 0 classic, 1 tall and slender with a leaning top, 2 shorter and bushier. */
+export function birchGeometry(foliage: THREE.Color, foliageAlt: THREE.Color, variant = 0): Geo {
+  const shape = [
+    { h: 4.6, clumps: 7, spread: 0.75, size: 0.5, lean: 0, seed: 33 },
+    { h: 5.8, clumps: 9, spread: 0.6, size: 0.45, lean: 0.12, seed: 133 },
+    { h: 3.7, clumps: 8, spread: 1.0, size: 0.6, lean: -0.06, seed: 233 },
+  ][variant] ?? { h: 4.6, clumps: 7, spread: 0.75, size: 0.5, lean: 0, seed: 33 };
   // White bark with dark lenticel dashes.
-  const bark = new THREE.CylinderGeometry(0.09, 0.15, 4.6, 7, 12).translate(0, 2.3, 0);
+  const bark = new THREE.CylinderGeometry(0.09, 0.15, shape.h, 7, 12).translate(0, shape.h / 2, 0);
   const parts: Geo[] = [
     painted(
       bark,
@@ -299,27 +324,34 @@ export function birchGeometry(foliage: THREE.Color, foliageAlt: THREE.Color): Ge
   const light = foliageAlt.clone().lerp(new THREE.Color('#C9D27A'), 0.25);
   const ramp = foliageRamp(foliage.clone().lerp(light, 0.5), light);
   const clumps: Geo[] = [];
-  const rnd = mulberry32(33);
-  for (let i = 0; i < 7; i++) {
+  const rnd = mulberry32(shape.seed);
+  const top = shape.h - 1.6;
+  for (let i = 0; i < shape.clumps; i++) {
     const a = i * 2.4;
-    const y = 3.0 + (i / 7) * 2.4;
-    const r = 0.75 - (i / 7) * 0.35;
-    clumps.push(clump(Math.cos(a) * r, y, Math.sin(a) * r, 0.5 + rnd() * 0.25, 40 + i, 0.85));
+    const f = i / shape.clumps;
+    const y = top + f * 2.4 * (shape.h / 4.6);
+    const r = shape.spread - f * shape.spread * 0.45;
+    // A gentle lean towards the top.
+    const lean = shape.lean * (y - 2);
+    clumps.push(clump(Math.cos(a) * r + lean, y, Math.sin(a) * r, shape.size + rnd() * 0.25, shape.seed + 7 + i, 0.85));
   }
-  parts.push(painted(mergeGeometries(clumps)!, foliagePaint(ramp, 2.6, 5.8, 9, 2.2), swayAbove(2.6, 3)));
+  parts.push(painted(mergeGeometries(clumps)!, foliagePaint(ramp, 2.6, shape.h + 1.2, 9, 2.2), swayAbove(2.6, 3)));
   return mergeGeometries(parts)!;
 }
 
-export function bushGeometry(foliage: THREE.Color, foliageAlt: THREE.Color): Geo {
+/** Bush. `variant`: 0 classic, 1 low and spreading, 2 taller and rounder. */
+export function bushGeometry(foliage: THREE.Color, foliageAlt: THREE.Color, variant = 0): Geo {
   const ramp = foliageRamp(foliage, foliageAlt);
-  const rnd = mulberry32(41);
-  const clumps: Geo[] = [clump(0, 0.45, 0, 0.55, 41, 0.75)];
-  for (let i = 0; i < 5; i++) {
+  const rnd = mulberry32(41 + variant * 100);
+  const sx = variant === 1 ? 1.35 : variant === 2 ? 0.9 : 1;
+  const sy = variant === 1 ? 0.75 : variant === 2 ? 1.35 : 1;
+  const clumps: Geo[] = [clump(0, 0.45 * sy, 0, 0.55, 41 + variant, 0.75)];
+  for (let i = 0; i < 5 + variant; i++) {
     const a = i * 1.25 + rnd();
     const r = 0.45 + rnd() * 0.25;
-    clumps.push(clump(Math.cos(a) * r, 0.3 + rnd() * 0.35, Math.sin(a) * r, 0.3 + rnd() * 0.18, 50 + i, 0.75));
+    clumps.push(clump(Math.cos(a) * r * sx, (0.3 + rnd() * 0.35) * sy, Math.sin(a) * r * sx, 0.3 + rnd() * 0.18, 50 + i + variant * 10, 0.75));
   }
-  return painted(mergeGeometries(clumps)!, foliagePaint(ramp, 0, 1.1, 13, 2.4), swayAbove(0.1, 1));
+  return painted(mergeGeometries(clumps)!, foliagePaint(ramp, 0, 1.1 * sy, 13, 2.4), swayAbove(0.1, 1));
 }
 
 export function rockGeometry(): Geo {

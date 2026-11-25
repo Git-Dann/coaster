@@ -158,10 +158,33 @@ export class VegetationLayer {
   }
 }
 
-/** Player-placed scenery, one InstancedMesh per type. */
+/** Trees and bushes the player places come in several shapes each (see the geometry builders). */
+const VARIANTS: Partial<Record<SceneryType, number>> = { oak: 3, birch: 3, pine: 3, bush: 3 };
+
+/** A stable 0..1 number from an item id, so each placed tree keeps its look across reloads. */
+function idHash(id: string, salt: number): number {
+  let h = 2166136261 ^ salt;
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  h ^= h >>> 13;
+  h = Math.imul(h, 0x5bd1e995);
+  h ^= h >>> 15;
+  return (h >>> 0) / 4294967296;
+}
+
+const lean = new THREE.Quaternion();
+const leanAxis = new THREE.Vector3();
+const tint = new THREE.Color();
+
+/**
+ * Player-placed scenery, one InstancedMesh per type (and per shape for trees and bushes). Each
+ * placed tree gets its own shape, height, width, slight lean and leaf tint, picked from its id.
+ */
 export class SceneryLayer {
   readonly group = new THREE.Group();
-  private meshes = new Map<SceneryType, THREE.InstancedMesh>();
+  private meshes = new Map<string, THREE.InstancedMesh>();
   private glow: THREE.InstancedMesh;
   readonly glowMaterial: THREE.MeshStandardMaterial;
   private readonly propMaterial: THREE.MeshStandardMaterial;
@@ -203,15 +226,23 @@ export class SceneryLayer {
       sign: signGeometry(),
       hut: hutGeometry(),
     };
-    for (const [t, g] of Object.entries(geos) as Array<[SceneryType, THREE.BufferGeometry]>) {
+    const cfg = BIOME_CONFIG[this.biome];
+    const f = new THREE.Color().setRGB(...cfg.foliage, THREE.SRGBColorSpace);
+    const fa = new THREE.Color().setRGB(...cfg.foliageAlt, THREE.SRGBColorSpace);
+    const variantGeo = (t: SceneryType, v: number): THREE.BufferGeometry =>
+      v === 0 ? geos[t] : t === 'oak' ? oakGeometry(f, fa, v) : t === 'birch' ? birchGeometry(f, fa, v) : t === 'pine' ? pineGeometry(f, fa, v) : bushGeometry(f, fa, v);
+    for (const t of Object.keys(geos) as SceneryType[]) {
       const isVeg = t in veg;
-      const mesh = new THREE.InstancedMesh(g, isVeg ? this.foliage : this.propMaterial, SceneryLayer.CAP);
-      mesh.count = 0;
-      mesh.castShadow = t !== 'flowers' && t !== 'grass';
-      mesh.receiveShadow = true;
-      mesh.frustumCulled = false;
-      this.meshes.set(t, mesh);
-      this.group.add(mesh);
+      for (let v = 0; v < (VARIANTS[t] ?? 1); v++) {
+        const mesh = new THREE.InstancedMesh(variantGeo(t, v), isVeg ? this.foliage : this.propMaterial, SceneryLayer.CAP);
+        mesh.count = 0;
+        mesh.castShadow = t !== 'flowers' && t !== 'grass';
+        mesh.receiveShadow = true;
+        mesh.frustumCulled = false;
+        if (VARIANTS[t]) mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(SceneryLayer.CAP * 3).fill(1), 3);
+        this.meshes.set(`${t}#${v}`, mesh);
+        this.group.add(mesh);
+      }
     }
   }
 
@@ -226,23 +257,42 @@ export class SceneryLayer {
   }
 
   rebuild(items: readonly SceneryItem[], heightAt: (x: number, z: number) => number): void {
-    const counts = new Map<SceneryType, number>();
+    const counts = new Map<string, number>();
     let glow = 0;
     for (const it of items) {
-      const mesh = this.meshes.get(it.type);
+      const variants = VARIANTS[it.type] ?? 1;
+      const v = variants > 1 ? Math.min(variants - 1, Math.floor(idHash(it.id, 1) * variants)) : 0;
+      const key = `${it.type}#${v}`;
+      const mesh = this.meshes.get(key);
       if (!mesh) continue;
-      const n = counts.get(it.type) ?? 0;
+      const n = counts.get(key) ?? 0;
       if (n >= SceneryLayer.CAP) continue;
       const y = heightAt(it.p[0], it.p[2]);
       q.setFromAxisAngle(up, it.rot);
-      m4.compose(pos.set(it.p[0], y, it.p[2]), q, scl.setScalar(it.scale));
+      if (variants > 1) {
+        // Each tree its own proportions and a slight lean (never more than about 5°).
+        const tallness = 0.85 + idHash(it.id, 2) * 0.35;
+        const width = 0.88 + idHash(it.id, 3) * 0.26;
+        const leanA = idHash(it.id, 4) * Math.PI * 2;
+        leanAxis.set(Math.cos(leanA), 0, Math.sin(leanA));
+        lean.setFromAxisAngle(leanAxis, (idHash(it.id, 5) - 0.5) * 0.18);
+        q.premultiply(lean);
+        scl.set(it.scale * width, it.scale * tallness, it.scale * width);
+        // A gentle shift in leaf colour: a little lighter or deeper, warmer or cooler.
+        const light = 0.86 + idHash(it.id, 6) * 0.26;
+        const warm = (idHash(it.id, 7) - 0.5) * 0.12;
+        tint.setRGB(light * (1 + warm), light, light * (1 - warm));
+        mesh.setColorAt(n, tint);
+      } else scl.setScalar(it.scale);
+      m4.compose(pos.set(it.p[0], y, it.p[2]), q, scl);
       mesh.setMatrixAt(n, m4);
-      counts.set(it.type, n + 1);
+      counts.set(key, n + 1);
       if (it.type === 'lantern' && glow < 1000) this.glow.setMatrixAt(glow++, m4);
     }
-    for (const [t, mesh] of this.meshes) {
-      mesh.count = counts.get(t) ?? 0;
+    for (const [k, mesh] of this.meshes) {
+      mesh.count = counts.get(k) ?? 0;
       mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     }
     this.glow.count = glow;
     this.glow.instanceMatrix.needsUpdate = true;

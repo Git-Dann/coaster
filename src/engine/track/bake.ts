@@ -10,7 +10,6 @@ import {
   scale,
   addScaled,
   rotateAxis,
-  smoothstep,
   clamp,
 } from '../core/vec3';
 import { buildSegments, evalSegment, segmentCount, type HermiteSegment } from './spline';
@@ -197,7 +196,16 @@ export class BakedTrack {
     const kb: number[] = [];
     for (let i = 0; i < nodes.length; i++) {
       ks.push(this.nodeS[i]!);
-      kb.push(nodes[i]!.bank);
+      // Read each bank relative to the one before (never more than half a turn apart): pieces
+      // can disagree on how many whole rolls came before them, and a whole-turn difference between
+      // neighbours would otherwise spin the train a full turn in a metre. Real rolls spread over
+      // several nodes, so they're kept.
+      let b = nodes[i]!.bank;
+      if (i > 0) {
+        const prev = kb[i - 1]!;
+        b = prev + (b - prev) - Math.round((b - prev) / (2 * Math.PI)) * 2 * Math.PI;
+      }
+      kb.push(b);
     }
     if (this.closed && segCount === nodes.length) {
       const last = kb[kb.length - 1]!;
@@ -262,28 +270,81 @@ export class BakedTrack {
     if (len(right) < 1e-6) set(right, 0, 0, 1);
     normalize(prevRight, right);
 
+    // 1. Carry the frame along the track without any twist (rotation-minimising transport).
     const frameAt = (Tv: V3, prev: V3, out: V3) => {
-      addScaled(cand, prev, Tv, -dot(prev, Tv));
-      normalize(cand, cand);
-      cross(upr, Tv, WORLD_UP);
-      const hl = len(upr);
-      if (hl > 1e-6) {
-        scale(upr, upr, 1 / hl);
-        if (dot(upr, cand) < 0) scale(upr, upr, -1);
-        const w = smoothstep(0.1, 0.25, hl);
-        for (let c = 0; c < 3; c++) out[c] = cand[c]! + (upr[c]! - cand[c]!) * w;
-        addScaled(out, out, Tv, -dot(out, Tv));
-        normalize(out, out);
-        if (len(out) < 0.5) copy(out, cand);
-      } else copy(out, cand);
+      addScaled(out, prev, Tv, -dot(prev, Tv));
+      normalize(out, out);
+      if (len(out) < 0.5) copy(out, prev);
     };
-
     for (let i = 0; i < N; i++) {
       this.readVec(this.tan, i, T);
       frameAt(T, prevRight, right);
       rights.set(right, i * 3);
       copy(prevRight, right);
     }
+    // 2. Where the track is close to level, it should be exactly upright (before banking). Measure
+    //    the angle that would take the carried frame to upright at those points ("anchors").
+    //    Through steep and inverted stretches (loops, rolls, vertical drops) upright isn't defined
+    //    well: near vertical it swings round quickly, and steering towards it there pinches the
+    //    rails. So the correction is blended smoothly from one level stretch to the next instead.
+    const corr = new Float64Array(N);
+    const anchor = new Uint8Array(N);
+    let lastCorr = 0;
+    for (let i = 0; i < N; i++) {
+      this.readVec(this.tan, i, T);
+      cross(upr, T, WORLD_UP);
+      const hl = len(upr);
+      if (hl < 0.9) continue;
+      scale(upr, upr, 1 / hl);
+      set(cand, rights[i * 3]!, rights[i * 3 + 1]!, rights[i * 3 + 2]!);
+      // Upside-down level track (the top of a loop) stays upside down: of the two level
+      // orientations, take the one nearer the frame as corrected at the previous level point (not
+      // the raw carried frame, which can drift a long way on turning climbs and would flip).
+      const phi = Math.atan2(dot(cross(up, cand, upr), T), dot(cand, upr));
+      const alt = phi + Math.PI;
+      const near = (a: number) => Math.abs(a - lastCorr - Math.round((a - lastCorr) / (2 * Math.PI)) * 2 * Math.PI);
+      const pick = near(phi) <= near(alt) ? phi : alt;
+      corr[i] = lastCorr + (pick - lastCorr) - Math.round((pick - lastCorr) / (2 * Math.PI)) * 2 * Math.PI;
+      lastCorr = corr[i]!;
+      anchor[i] = 1;
+    }
+    // Keep the anchor angles continuous along the track (no jumps of a whole turn).
+    let lastA = -1;
+    for (let i = 0; i < N; i++) {
+      if (!anchor[i]) continue;
+      if (lastA >= 0) {
+        let dlt = corr[i]! - corr[lastA]!;
+        dlt -= Math.round(dlt / (2 * Math.PI)) * 2 * Math.PI;
+        corr[i] = corr[lastA]! + dlt;
+      }
+      lastA = i;
+    }
+    // Blend between anchors (eased over the distance), hold the nearest value past the ends.
+    let prevA = -1;
+    for (let i = 0; i <= N; i++) {
+      if (i < N && !anchor[i]) continue;
+      const a = prevA;
+      const b = i < N ? i : -1;
+      for (let k = a + 1; k < (b >= 0 ? b : N); k++) {
+        if (a < 0 && b < 0) corr[k] = 0;
+        else if (a < 0) corr[k] = corr[b]!;
+        else if (b < 0) corr[k] = corr[a]!;
+        else {
+          const u = (k - a) / (b - a);
+          corr[k] = corr[a]! + (corr[b]! - corr[a]!) * u * u * (3 - 2 * u);
+        }
+      }
+      prevA = b;
+    }
+    for (let i = 0; i < N; i++) {
+      if (Math.abs(corr[i]!) < 1e-12) continue;
+      this.readVec(this.tan, i, T);
+      const r: V3 = [rights[i * 3]!, rights[i * 3 + 1]!, rights[i * 3 + 2]!];
+      rotateAxis(r, r, T, corr[i]!);
+      rights.set(r, i * 3);
+    }
+    // The last frame, for measuring the seam of a closed circuit.
+    set(prevRight, rights[(N - 1) * 3]!, rights[(N - 1) * 3 + 1]!, rights[(N - 1) * 3 + 2]!);
 
     let seamTwist = 0;
     let seamFlip = false;

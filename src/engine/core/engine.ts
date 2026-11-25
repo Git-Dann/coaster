@@ -276,6 +276,42 @@ export class Engine {
     cancelAnimationFrame(this.raf);
   }
 
+  /**
+   * The colour of the bottom edge of the picture, as '#rrggbb'. Phone browsers show the page
+   * background under their floating toolbars; matching it to the scene there avoids a flat band.
+   * Sampled on request (one pixel row, straight after a frame is drawn), never every frame.
+   */
+  bottomEdgeColour: string | null = null;
+  private edgeSampleWanted = false;
+  private readonly edgePixels = new Uint8Array(4 * 5);
+  requestEdgeSample(): void {
+    this.edgeSampleWanted = true;
+  }
+  private sampleBottomEdge(): void {
+    this.edgeSampleWanted = false;
+    const gl = this.renderer.getContext();
+    const w = gl.drawingBufferWidth;
+    if (w < 10 || this.contextLost) return;
+    try {
+      // Five pixels across the bottom row (GL's origin is the bottom-left corner), averaged.
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      for (let i = 0; i < 5; i++) {
+        gl.readPixels(Math.floor(((i + 0.5) / 5) * w), 1, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, this.edgePixels.subarray(i * 4, i * 4 + 4));
+        r += this.edgePixels[i * 4]!;
+        g += this.edgePixels[i * 4 + 1]!;
+        b += this.edgePixels[i * 4 + 2]!;
+      }
+      // A blank read (a browser that has already presented the frame) would give black: keep the old colour.
+      if (r + g + b < 5 * 30) return;
+      const hex = (v: number) => Math.round(v / 5).toString(16).padStart(2, '0');
+      this.bottomEdgeColour = `#${hex(r)}${hex(g)}${hex(b)}`;
+    } catch {
+      /* reading pixels is a nicety: ignore any failure */
+    }
+  }
+
   resize(): void {
     const w = Math.max(1, this.canvas.clientWidth);
     const h = Math.max(1, this.canvas.clientHeight);
@@ -514,10 +550,18 @@ export class Engine {
     this.afterTerrainChange();
   }
 
+  /**
+   * Shape the ground. While a brush is being dragged only the ground updates (fast); the track,
+   * supports and scenery follow once, a moment after the last stroke, instead of being rebuilt for
+   * every step of the drag (which made brushing crawl on phones).
+   */
   addTerrainStroke(s: TerrainStroke): void {
     this.terrain.addStroke(s);
-    this.afterTerrainChange();
+    window.clearTimeout(this.terrainSettle);
+    this.terrainSettle = window.setTimeout(() => this.afterTerrainChange(), 260);
   }
+
+  private terrainSettle = 0;
 
   private afterTerrainChange(): void {
     // The return track re-routes over the new ground; supports re-anchor; scenery follows the surface.
@@ -1004,6 +1048,7 @@ export class Engine {
     this.updateAudio(dt, supportsMoving);
 
     this.painterly.render(this.renderer, this.scene, cam, this.elapsed, this.atmosphere.horizon, Math.max(this.terrain.drawDistance, 650, viewDist));
+    if (this.edgeSampleWanted) this.sampleBottomEdge();
 
     // Performance bookkeeping.
     this.cpuMs = performance.now() - t0;
@@ -1117,6 +1162,7 @@ export class Engine {
   }
 
   dispose(): void {
+    window.clearTimeout(this.terrainSettle);
     this.stop();
     this.gestures.dispose();
     this.canvas.removeEventListener('webglcontextlost', this.onLost);

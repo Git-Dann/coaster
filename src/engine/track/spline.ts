@@ -56,6 +56,9 @@ export function segmentCount(design: Pick<TrackDesign, 'nodes' | 'closed'>): num
   return design.closed ? n : n - 1;
 }
 
+/** Share of a curve's bend kept at a node next to a straight (0 = none, 0.5 = plain average). */
+const STRAIGHT_EASE = 0;
+
 /** Build all Hermite segments for a design. Pure; safe to call off the main thread. */
 export function buildSegments(design: Pick<TrackDesign, 'nodes' | 'closed'>): HermiteSegment[] {
   const nodes = design.nodes;
@@ -86,12 +89,19 @@ export function buildSegments(design: Pick<TrackDesign, 'nodes' | 'closed'>): He
   // segment must stay straight: a node next to one gets zero curvature, otherwise the bend of the
   // neighbouring segment would bleed in and make the straight sag or wander.
   const straight: boolean[] = [];
+  const planStraight: boolean[] = [];
   for (let s = 0; s < count; s++) {
     const a = at(s);
     const b = at(s + 1);
     sub(tmp, b.p, a.p);
     const chord = len(tmp);
     straight.push(chord > 1e-6 && dot(a.dir, b.dir) > 0.99999 && dot(tmp, a.dir) / chord > 0.99999);
+    // Straight in plan (no sideways bend), even if it ramps up or down.
+    const ha = Math.hypot(a.dir[0], a.dir[2]);
+    const hb = Math.hypot(b.dir[0], b.dir[2]);
+    const hc = Math.hypot(tmp[0], tmp[2]);
+    const planAlign = (x0: number, z0: number, x1: number, z1: number, l0: number, l1: number) => (x0 * x1 + z0 * z1) / Math.max(1e-9, l0 * l1);
+    planStraight.push(ha > 0.2 && hb > 0.2 && hc > 1e-6 && planAlign(a.dir[0], a.dir[2], b.dir[0], b.dir[2], ha, hb) > 0.99999 && planAlign(a.dir[0], a.dir[2], tmp[0], tmp[2], ha, hc) > 0.99999);
   }
 
   // Shared curvature at each node: average of incoming and outgoing estimates.
@@ -110,7 +120,20 @@ export function buildSegments(design: Pick<TrackDesign, 'nodes' | 'closed'>): He
       w++;
     }
     if (w > 0) scale(k, k, 1 / w);
-    if ((outSeg >= 0 && straight[outSeg]) || (inSeg >= 0 && inSeg < count && straight[inSeg])) scale(k, k, 0);
+    // Next to a straight, keep only a little of the neighbouring curve's bend at the shared node: a
+    // short easement into the curve (so it doesn't arrive all at once), without making the straight
+    // itself sag or wander.
+    if ((outSeg >= 0 && straight[outSeg]) || (inSeg >= 0 && inSeg < count && straight[inSeg])) scale(k, k, STRAIGHT_EASE);
+    else if ((outSeg >= 0 && planStraight[outSeg]) || (inSeg >= 0 && inSeg < count && planStraight[inSeg])) {
+      // Straight in plan (a ramp): keep its up-and-down bend, drop the sideways one.
+      const d = at(i).dir;
+      const lx = -d[2];
+      const lz = d[0];
+      const ll = Math.hypot(lx, lz) || 1;
+      const side = (k[0] * lx + k[2] * lz) / ll;
+      k[0] -= (side * lx) / ll;
+      k[2] -= (side * lz) / ll;
+    }
     // Remove any tangential component so the curvature is perpendicular to the node direction.
     const d = at(i).dir;
     addScaled(k, k, d, -dot(k, d));

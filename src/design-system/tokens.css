@@ -103,9 +103,10 @@ body,
   margin: 0;
   height: 100%;
   overflow: hidden;
-  /* Matches the scene's horizon (updated at runtime), so any strip the browser shows around the
-     page blends into the sky instead of showing a flat band. */
-  background: var(--scene-bg, #dde6e8);
+  /* Any strip the browser shows around the page blends into the scene instead of showing a flat
+     band: the page takes the colour of the bottom of the picture (what sits under a phone's floating
+     toolbar), falling back to the horizon. Both are updated at runtime. */
+  background: var(--scene-bg-bottom, var(--scene-bg, #dde6e8));
   color: var(--ink);
   font-family: var(--font);
   font-weight: var(--fw-regular);

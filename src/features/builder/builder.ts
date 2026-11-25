@@ -57,6 +57,12 @@ export interface BuildContext {
   uprightBank: number;
   /** Estimated train speed at the end (m/s), used for auto-banking. */
   speedAtEnd: number;
+  /** The train's real speed arriving at the element, when known (edit mode): shapes drops for it. */
+  entrySpeed?: number;
+  /** Sideways offset of a loop's exit (m). On the edit grid it's one tile, so the exit lands on a grid line. */
+  loopLateral?: number;
+  /** Sideways shift of a corkscrew's exit (m); 0 on the edit grid so it exits in line. */
+  corkscrewShift?: number;
   autoBank: boolean;
 }
 
@@ -102,7 +108,7 @@ export const PRESETS: Preset[] = [
       { key: 'angle', label: 'Angle', min: 30, max: 75, step: 1, unit: '°' },
     ],
     defaults: { depth: 18, angle: 50 },
-    make: (c, p, ctx) => drop({ ...c, bank: ctx.uprightBank }, p.depth!, p.angle!),
+    make: (c, p, ctx) => drop({ ...c, bank: ctx.uprightBank }, p.depth!, p.angle!, undefined, ctx.entrySpeed),
   },
   {
     id: 'hill',
@@ -137,7 +143,7 @@ export const PRESETS: Preset[] = [
     hint: 'Needs plenty of speed: aim for a drop at least as tall as the loop.',
     params: [{ key: 'height', label: 'Height', min: 10, max: 40, step: 0.5, unit: 'm' }],
     defaults: { height: 18 },
-    make: (c, p, ctx) => verticalLoop({ ...c, bank: ctx.uprightBank }, p.height!),
+    make: (c, p, ctx) => verticalLoop({ ...c, bank: ctx.uprightBank }, p.height!, ctx.loopLateral),
   },
   {
     id: 'corkscrew',
@@ -148,7 +154,7 @@ export const PRESETS: Preset[] = [
       { key: 'direction', label: 'Direction', min: -1, max: 1, step: 2, unit: '' },
     ],
     defaults: { length: 22, direction: 1 },
-    make: (c, p, ctx) => corkscrew({ ...c, bank: ctx.uprightBank }, p.length!, 3.4, dirSign(p.direction!)),
+    make: (c, p, ctx) => corkscrew({ ...c, bank: ctx.uprightBank }, p.length!, 3.4, dirSign(p.direction!), ctx.corkscrewShift),
   },
   {
     id: 'zerog',
