@@ -140,10 +140,19 @@ test('edit mode: no dead buttons, select and change a piece in the middle, remov
   const xy = await page.evaluate(() => {
     const e = (window as any).__cozy.engine;
     const d = (window as any).__cozy.store.getState().design;
-    const n = d.nodes[d.nodes.length - 3];
-    const v = new e.rig.camera.position.constructor(n.p[0], n.p[1], n.p[2]).project(e.rig.camera);
-    return [((v.x + 1) / 2) * innerWidth, ((1 - v.y) / 2) * innerHeight];
+    // A player taps track they can see: the first built node (from the end) that is on the open canvas.
+    for (let i = d.nodes.length - 2; i >= 0; i--) {
+      if (d.nodes[i].group === 'station') continue;
+      const p = d.nodes[i].p;
+      const v = new e.rig.camera.position.constructor(p[0], p[1], p[2]).project(e.rig.camera);
+      const x = ((v.x + 1) / 2) * innerWidth;
+      const y = ((1 - v.y) / 2) * innerHeight;
+      if (v.z < 1 && document.elementFromPoint(x, y)?.classList.contains('cc-canvas')) return [x, y];
+    }
+    return null;
   });
+  expect(xy, 'some built track is visible on the open canvas').not.toBeNull();
+  if (!xy) return;
   await page.mouse.click(xy[0], xy[1]);
   await expect.poll(() => page.evaluate(() => (window as any).__cozy.store.getState().editSel)).not.toBeNull();
   await btn('Done').click();
