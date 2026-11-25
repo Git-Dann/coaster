@@ -3,7 +3,8 @@ import type { SimEvent } from '../engine/physics/train-sim';
 import type { V3 } from '../engine/core/vec3';
 import { useGame } from '../stores/game';
 import { planDragToPiece } from '../features/builder/builder';
-import { addPiece, adjustPiece, clampParam, pieceById, planNext, removePiece, type BuildChoice, type NextPiece, type PieceId } from '../features/builder/simple-builder';
+import { addPiece, adjustPiece, clampParam, pieceById, piecesOf, planNext, removePiece, replacePiece, type BuildChoice, type NextPiece, type PieceId } from '../features/builder/simple-builder';
+import { gridFrame } from '../engine/track/grid';
 import { TIMBER_STYLES } from '../engine/supports/support-gen';
 import type { TrackDesign } from '../engine/track/types';
 import { newItemId } from '../features/saves';
@@ -70,11 +71,16 @@ export function tapPiece(id: PieceId): void {
 // ------------------------------------------------------------------ edit mode
 
 let ghostPlan: NextPiece | null = null;
+/** Has the player picked a new choice since selecting the piece? (Older pieces have no choice to compare.) */
+let selTouched = false;
+let pendingEdit: { design: TrackDesign; index: number } | null = null;
 let ghostRaf = 0;
 
+const sameChoice = (a: BuildChoice | null, b: BuildChoice) => !!a && JSON.stringify(a) === JSON.stringify(b);
+
 /**
- * Edit mode shows the next piece as a see-through ghost at the end of the track. Nothing changes
- * until "Add piece" commits it (one undo step).
+ * Edit mode shows the next piece (or the change to a selected piece) as a see-through ghost.
+ * Nothing changes until "Add piece" or "Apply" commits it (one undo step).
  */
 export function refreshGhost(): void {
   cancelAnimationFrame(ghostRaf);
@@ -84,31 +90,71 @@ export function refreshGhost(): void {
     if (!e) return;
     if (g.panel !== 'build') {
       ghostPlan = null;
+      pendingEdit = null;
       e.setPreview(null);
-      if (g.ghost) useGame.setState({ ghost: null });
+      e.setGrid(null);
+      if (g.ghost || g.editSel) useGame.setState({ ghost: null, editSel: null });
       return;
     }
     try {
+      const pieces = piecesOf(g.design);
+      const k = g.editSel ? pieces.findIndex((p) => p.group === g.editSel) : -1;
+      if (g.editSel && k < 0) {
+        useGame.setState({ editSel: null });
+        return;
+      }
+      if (k >= 0) {
+        // Editing a selected piece.
+        const piece = pieces[k]!;
+        const base: TrackDesign = { ...g.design, nodes: g.design.nodes.slice(0, piece.start) };
+        const down = g.buildChoice.kind === 'track' ? planNext(base, { ...g.buildChoice, slope: -1 }, ground, e.track) : null;
+        const changed = piece.choice ? !sameChoice(piece.choice, g.buildChoice) : selTouched;
+        ghostPlan = null;
+        let height = 0;
+        let crossing: NextPiece['crossing'] = null;
+        let atGround = false;
+        let dropped = 0;
+        if (changed) {
+          const r = replacePiece(g.design, piece.group, g.buildChoice, ground, e.track);
+          const first = planNext(base, g.buildChoice, ground, e.track);
+          pendingEdit = { design: r.design, index: k };
+          dropped = r.dropped;
+          height = first.height;
+          crossing = first.crossing;
+          atGround = first.atGround;
+          e.setPreview(r.design, { fromNode: r.start - 1, toNode: r.design.nodes.length - 1 });
+        } else {
+          pendingEdit = null;
+          const endNode = g.design.nodes[piece.end]!;
+          height = endNode.p[1] - ground(endNode.p[0], endNode.p[2]);
+          e.setPreview(g.design, { fromNode: piece.start - 1, toNode: piece.end });
+        }
+        const at = g.design.nodes[piece.end]!.p;
+        e.setGrid(gridFrame(g.design), at);
+        const from = g.design.nodes[Math.max(0, piece.start - 1)]!.p;
+        e.lookAt([(from[0] + at[0]) / 2, (from[1] + at[1]) / 2, (from[2] + at[2]) / 2], choiceDistance(g.buildChoice));
+        useGame.setState({ ghost: { height, atGround, crossing, downBlocked: !!down?.atGround, changed, dropped } });
+        return;
+      }
+      // Adding to the end.
+      pendingEdit = null;
       ghostPlan = planNext(g.design, g.buildChoice, ground, e.track);
+      const down = g.buildChoice.kind === 'track' ? planNext(g.design, { ...g.buildChoice, slope: -1 }, ground, e.track) : null;
+      const nodes = ghostPlan.design.nodes;
+      const end = nodes[nodes.length - 1]!;
+      const from = nodes[ghostPlan.start - 1] ?? end;
+      e.setPreview(ghostPlan.design);
+      e.setGrid(gridFrame(ghostPlan.design), end.p);
+      e.lookAt([(from.p[0] + end.p[0]) / 2, (from.p[1] + end.p[1]) / 2, (from.p[2] + end.p[2]) / 2], choiceDistance(g.buildChoice));
+      useGame.setState({ ghost: { height: ghostPlan.height, atGround: ghostPlan.atGround, crossing: ghostPlan.crossing, downBlocked: !!down?.atGround, changed: true, dropped: 0 } });
     } catch (err) {
       // Never let a planning problem break the game: just show no ghost for this choice.
-      console.warn('Could not plan the next piece', err);
+      console.warn('Could not plan the piece', err);
       ghostPlan = null;
-    }
-    if (!ghostPlan) {
+      pendingEdit = null;
       e.setPreview(null);
       useGame.setState({ ghost: null });
-      return;
     }
-    const nodes = ghostPlan.design.nodes;
-    const end = nodes[nodes.length - 1]!;
-    const from = nodes[ghostPlan.start - 1] ?? end;
-    e.setPreview(ghostPlan.design);
-    // The grid stays invisible: pieces snap to it, but players only see the ghost.
-    // Keep both the end of the track and the ghost in view.
-    // Close enough to read the ghost clearly, far enough to see the track around it.
-    e.lookAt([(from.p[0] + end.p[0]) / 2, (from.p[1] + end.p[1]) / 2, (from.p[2] + end.p[2]) / 2], choiceDistance(g.buildChoice));
-    useGame.setState({ ghost: { height: ghostPlan.height, atGround: ghostPlan.atGround, crossing: ghostPlan.crossing } });
   });
 }
 
@@ -117,20 +163,63 @@ function choiceDistance(c: BuildChoice): number {
   return c.kind === 'special' ? 62 : 46;
 }
 
-/** Choose what the next piece will be (the ghost updates). */
+/** Choose what the next (or selected) piece will be; the ghost updates. */
 export function chooseBuild(c: BuildChoice): void {
   ui('select');
+  selTouched = true;
   useGame.setState({ buildChoice: c });
 }
 
-/** Build the ghost piece. */
+/** Build the ghost piece, or apply the change to the selected piece. */
 export function addGhost(): void {
   const g = useGame.getState();
+  if (g.editSel) {
+    if (!pendingEdit) return;
+    const { design, index } = pendingEdit;
+    g.commitDesign(design);
+    // Keep the same position selected (the changed piece has a new name).
+    useGame.setState({ editSel: piecesOf(design)[index]?.group ?? null });
+    services.engine?.audio.build(material(design), 'place');
+    announce('Piece changed.');
+    return;
+  }
   const plan = ghostPlan ?? planNext(g.design, g.buildChoice, ground, services.engine?.track);
-  if (!plan) return;
   g.commitDesign(plan.design);
   services.engine?.audio.build(material(plan.design), 'place');
   announce('Piece added.');
+}
+
+/** Remove the selected piece; the pieces after it move up to close the gap. */
+export function removeSelected(): void {
+  const g = useGame.getState();
+  if (!g.editSel) return removeLast();
+  const pieces = piecesOf(g.design);
+  const k = pieces.findIndex((p) => p.group === g.editSel);
+  if (k < 0) return;
+  const r = replacePiece(g.design, g.editSel, null, ground, services.engine?.track);
+  g.commitDesign(r.design);
+  const next = piecesOf(r.design)[k];
+  useGame.setState({ editSel: next?.group ?? null, buildChoice: next?.choice ?? g.buildChoice });
+  services.engine?.audio.build(material(r.design), 'delete');
+  announce(r.dropped ? `Piece removed, with ${r.dropped} older pieces after it.` : 'Piece removed.');
+}
+
+/** Select a piece to edit (or null to go back to adding at the end). */
+export function selectPiece(group: string | null): void {
+  ui('select');
+  selTouched = false;
+  const piece = group ? piecesOf(useGame.getState().design).find((p) => p.group === group) : null;
+  useGame.setState({ editSel: piece ? piece.group : null, ...(piece?.choice ? { buildChoice: piece.choice } : {}) });
+}
+
+/** Step the selection to the previous or next piece (like the arrows in a park builder). */
+export function stepSelection(dir: -1 | 1): void {
+  const g = useGame.getState();
+  const pieces = piecesOf(g.design);
+  if (!pieces.length) return;
+  const k = g.editSel ? pieces.findIndex((p) => p.group === g.editSel) : pieces.length;
+  const next = k + dir;
+  selectPiece(next >= 0 && next < pieces.length ? pieces[next]!.group : null);
 }
 
 let pending: Record<string, number> | null = null;
@@ -217,6 +306,14 @@ function onHandleDrag(kind: 'plan' | 'height', phase: 'start' | 'move' | 'end' |
 
 function onTap(hit: PickResult): void {
   const g = useGame.getState();
+  if (g.panel === 'build') {
+    // Edit mode: tap your track to select a piece; tap the station or open ground to go back to the end.
+    if (hit.type === 'track') {
+      const group = g.design.nodes[hit.node]?.group;
+      selectPiece(group && group !== 'station' ? group : null);
+    } else if (hit.type === 'ground' && g.editSel) selectPiece(null);
+    return;
+  }
   if (g.panel !== 'decorate' || hit.type !== 'ground') return;
   if (g.sceneryTool) {
     const item = { id: newItemId('sc'), type: g.sceneryTool, p: hit.point, rot: Math.random() * Math.PI * 2, scale: 0.85 + Math.random() * 0.3 };
@@ -307,7 +404,7 @@ export function connectStore(engine: Engine): () => void {
     if (s.design !== p.design || s.panel !== p.panel) syncHandles(engine);
     // Edit mode: the train waits in the station, and the ghost follows every change.
     if (s.panel !== p.panel && (s.panel === 'build' || p.panel === 'build')) engine.holdTrain(s.panel === 'build');
-    if (s.panel === 'build' || p.panel === 'build') if (s.design !== p.design || s.panel !== p.panel || s.buildChoice !== p.buildChoice) refreshGhost();
+    if (s.panel === 'build' || p.panel === 'build') if (s.design !== p.design || s.panel !== p.panel || s.buildChoice !== p.buildChoice || s.editSel !== p.editSel) refreshGhost();
   });
   syncHandles(engine);
   return unsub;

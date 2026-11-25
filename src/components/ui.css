@@ -1376,3 +1376,48 @@
     min-height: 40px;
   }
 }
+/* Edit mode header: piece navigation and Done. */
+.cc-build-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px;
+}
+.cc-build-head .cc-round {
+  width: 40px;
+  height: 40px;
+}
+.cc-build-head .cc-round:disabled {
+  opacity: 0.35;
+}
+.cc-build-title {
+  flex: 1;
+  min-width: 0;
+  font-weight: var(--fw-bold);
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cc-pill-btn.small {
+  min-height: 40px;
+  padding: 0 12px;
+  font-size: 0.85rem;
+}
+.cc-pill-btn.done {
+  background: var(--charcoal);
+  color: #fbf6ee;
+}
+.cc-seg button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+@media (max-height: 520px) and (orientation: landscape) {
+  .cc-build-head .cc-round {
+    width: 34px;
+    height: 34px;
+  }
+  .cc-pill-btn.small {
+    min-height: 34px;
+  }
+}

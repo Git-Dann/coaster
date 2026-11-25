@@ -126,7 +126,7 @@ async function run(devName, devOpts) {
   await step('menu close', () => page.keyboard.press('Escape'), 600);
 
   // Build (edit mode): every direction/slope combination and every special piece, each added.
-  await step('build tab', () => btn('Build').click(), 1200);
+  await step('build tab', () => btn('Edit').click(), 1200);
   for (const dir of ['Straight', 'Turn left', 'Turn right']) {
     for (const slope of ['Level', 'Up', 'Down']) {
       await step(`choose ${dir} ${slope}`, async () => { await btn(dir).click(); await btn(slope).click(); }, 700);
@@ -137,6 +137,12 @@ async function run(devName, devOpts) {
     await step(`choose ${p}`, () => btn(p).click(), 900);
     await step(`add ${p}`, () => btn('Add piece').click(), 1000);
   }
+  // Edit existing pieces: step back, change one, remove one, back to the end.
+  await step('select previous piece', async () => { await btn('Previous piece').click(); await btn('Previous piece').click(); }, 1200);
+  await step('change selected to Hill', () => btn('Hill').click(), 1200);
+  await step('apply change', () => btn('Apply change').click(), 1200);
+  await step('remove selected piece', () => btn('Remove this piece').click(), 1200);
+  await step('go to end', () => btn('Go to end').click(), 1200);
   // Keyboard building (laptops): arrows choose, Enter adds, Backspace removes.
   await step('keyboard build', async () => {
     await page.mouse.click(5, 300);
@@ -204,7 +210,7 @@ async function run(devName, devOpts) {
   await step('after new coaster', async () => { const b = page.getByRole('button', { name: /Build your own|Start|blank|fresh/i }).first(); if (await b.isVisible().catch(() => false)) await b.click(); }, 2000);
 
   // Build again on a fresh coaster: a quick kid-style session.
-  await step('build tab 2', async () => { if (!(await btn('Add piece').isVisible().catch(() => false))) await btn('Build').click(); });
+  await step('build tab 2', async () => { if (!(await btn('Add piece').isVisible().catch(() => false))) await btn('Edit').click(); });
   for (const p of ['Turn left', 'Hill', 'Loop', 'Turn right', 'Spiral', 'Turn left', 'Drop', 'Straight']) {
     await step(`fresh add ${p}`, async () => { await btn(p).click(); await btn('Add piece').click(); }, 900);
   }

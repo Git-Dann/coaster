@@ -103,7 +103,7 @@ export class TrackRenderer {
     this.material.metalness = style === 'wood' || style === 'mine' ? 0.05 : 0.15;
   }
 
-  update(track: BakedTrack | null, style: TrackStyle, fromS = 0): void {
+  update(track: BakedTrack | null, style: TrackStyle, fromS = 0, toS = Infinity): void {
     if (!track || track.count < 2) {
       this.mesh.visible = false;
       return;
@@ -120,7 +120,7 @@ export class TrackRenderer {
     for (let i = 0; i < segCount; i++) {
       const s0 = nodeS[i]!;
       const s1 = i + 1 < nodeS.length ? nodeS[i + 1]! : track.length;
-      if (s1 <= fromS) continue;
+      if (s1 <= fromS || s0 >= toS - 1e-6) continue;
       const key = `${segmentHash(track, s0, s1, style)}@${o.join(',')}`;
       let g = this.cache.get(key) ?? next.get(key);
       if (!g) {

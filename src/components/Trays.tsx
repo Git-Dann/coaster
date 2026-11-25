@@ -3,8 +3,8 @@ import { useGame } from '../stores/game';
 import { Icon } from '../design-system/Icon';
 import { SWATCHES } from '../design-system/controls';
 import { services, ui } from '../app/services';
-import { addGhost, chooseBuild, removeLast } from '../app/bridge';
-import { SPECIALS, pieceById, type BuildChoice, type Slope, type Turn } from '../features/builder/simple-builder';
+import { addGhost, chooseBuild, removeLast, removeSelected, selectPiece, stepSelection } from '../app/bridge';
+import { SPECIALS, pieceById, piecesOf, type BuildChoice, type Slope, type Turn } from '../features/builder/simple-builder';
 import { autoGarden } from '../features/scenery/garden';
 import { MAX_CARS, MIN_CARS, type CarStyle } from '../engine/train/config';
 import type { SupportStyle, TrackStyle } from '../engine/track/types';
@@ -102,22 +102,46 @@ const SLOPES: Array<{ slope: Slope; label: string; icon: string }> = [
   { slope: 1, label: 'Up', icon: 'p-up' },
 ];
 
-function ghostHint(ghost: ReturnType<typeof useGame.getState>['ghost'], choice: BuildChoice): string {
+function ghostHint(ghost: ReturnType<typeof useGame.getState>['ghost'], choice: BuildChoice, editing: boolean): string {
   if (!ghost) return 'Choose the next piece';
-  if (ghost.atGround) return 'Already at the ground, so this piece stays level';
+  if (editing && !ghost.changed) return 'Choose a new shape for this piece, or remove it';
+  if (ghost.dropped) return `Changing this also removes ${ghost.dropped} older ${ghost.dropped === 1 ? 'piece' : 'pieces'} after it`;
+  if (ghost.atGround) return 'Already at the ground, so it stays level';
   if (ghost.crossing) return ghost.crossing.above ? `Passes under the track above (${Math.round(ghost.crossing.gap)} m clear)` : `Goes over the track below (${Math.round(ghost.crossing.gap)} m clear)`;
   const h = Math.round(ghost.height);
-  const what = choice.kind === 'special' ? pieceById(choice.id).label : 'The next piece';
+  const what = choice.kind === 'special' ? pieceById(choice.id).label : editing ? 'This piece' : 'The next piece';
   return h <= 2 ? `${what} ends near the ground` : `${what} ends ${h} m up`;
 }
 
 export function BuildTray() {
   const choice = useGame((s) => s.buildChoice);
   const ghost = useGame((s) => s.ghost);
+  const editSel = useGame((s) => s.editSel);
+  const design = useGame((s) => s.design);
+  const pieces = piecesOf(design);
+  const k = editSel ? pieces.findIndex((p) => p.group === editSel) : -1;
+  const editing = k >= 0;
   const track = choice.kind === 'track' ? choice : null;
   const pick = (turn: Turn, slope: Slope) => chooseBuild({ kind: 'track', turn, slope });
   return (
-    <Tray label="Build">
+    <Tray label="Edit track">
+      <div className="cc-build-head">
+        <button type="button" className="cc-round" aria-label="Previous piece" disabled={pieces.length === 0 || k === 0} onClick={() => stepSelection(-1)}>
+          <Icon name="left" size={20} />
+        </button>
+        <span className="cc-build-title">{editing ? `Piece ${k + 1} of ${pieces.length}` : 'Adding to the end'}</span>
+        <button type="button" className="cc-round" aria-label="Next piece" disabled={!editing} onClick={() => stepSelection(1)}>
+          <Icon name="right" size={20} />
+        </button>
+        {editing && (
+          <button type="button" className="cc-pill-btn small" onClick={() => selectPiece(null)}>
+            Go to end
+          </button>
+        )}
+        <button type="button" className="cc-pill-btn small done" onClick={() => (ui('close'), useGame.setState({ panel: 'none' }))}>
+          Done
+        </button>
+      </div>
       <div className="cc-build">
         <div className="cc-seg" role="group" aria-label="Direction">
           {DIRECTIONS.map((d) => (
@@ -128,12 +152,23 @@ export function BuildTray() {
           ))}
         </div>
         <div className="cc-seg" role="group" aria-label="Slope">
-          {SLOPES.map((sl) => (
-            <button key={sl.slope} type="button" className={track?.slope === sl.slope ? 'on' : ''} aria-pressed={track?.slope === sl.slope} onClick={() => pick(track?.turn ?? 0, sl.slope)}>
-              <Icon name={sl.icon} size={24} />
-              <span>{sl.label}</span>
-            </button>
-          ))}
+          {SLOPES.map((sl) => {
+            const blocked = sl.slope === -1 && !!ghost?.downBlocked;
+            return (
+              <button
+                key={sl.slope}
+                type="button"
+                className={track?.slope === sl.slope ? 'on' : ''}
+                aria-pressed={track?.slope === sl.slope}
+                disabled={blocked}
+                title={blocked ? 'Already at the ground' : undefined}
+                onClick={() => pick(track?.turn ?? 0, sl.slope)}
+              >
+                <Icon name={sl.icon} size={24} />
+                <span>{blocked ? 'At ground' : sl.label}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
       <Row label="Special pieces">
@@ -143,15 +178,28 @@ export function BuildTray() {
         })}
       </Row>
       <p className="cc-build-hint" aria-live="polite">
-        {ghostHint(ghost, choice)}
+        {ghostHint(ghost, choice, editing)}
       </p>
       <div className="cc-build-actions">
-        <button type="button" className="cc-pill-btn" onClick={() => (ui('tap'), removeLast())} aria-label="Remove the last piece">
-          <Icon name="trash" size={20} /> <span>Remove</span>
-        </button>
-        <button type="button" className="cc-add-btn" onClick={() => (ui('success'), addGhost())} aria-label="Add piece" disabled={!ghost}>
-          <Icon name="plus" size={22} /> <span>Add piece</span>
-        </button>
+        {editing ? (
+          <>
+            <button type="button" className="cc-pill-btn" onClick={() => (ui('tap'), removeSelected())} aria-label="Remove this piece">
+              <Icon name="trash" size={20} /> <span>Remove piece</span>
+            </button>
+            <button type="button" className="cc-add-btn" onClick={() => (ui('success'), addGhost())} aria-label="Apply change" disabled={!ghost?.changed}>
+              <Icon name="check" size={22} /> <span>Apply</span>
+            </button>
+          </>
+        ) : (
+          <>
+            <button type="button" className="cc-pill-btn" onClick={() => (ui('tap'), removeLast())} aria-label="Remove the last piece">
+              <Icon name="trash" size={20} /> <span>Remove</span>
+            </button>
+            <button type="button" className="cc-add-btn" onClick={() => (ui('success'), addGhost())} aria-label="Add piece" disabled={!ghost}>
+              <Icon name="plus" size={22} /> <span>Add piece</span>
+            </button>
+          </>
+        )}
       </div>
     </Tray>
   );

@@ -7,7 +7,7 @@ import { followEnd } from '../app/bridge';
 import { G0 } from '../engine/physics/train-sim';
 
 const NAV: Array<{ id: Exclude<Panel, 'none'>; label: string; icon: string }> = [
-  { id: 'build', label: 'Build', icon: 'build' },
+  { id: 'build', label: 'Edit', icon: 'build' },
   { id: 'decorate', label: 'Decorate', icon: 'scenery' },
   { id: 'paint', label: 'Paint', icon: 'style' },
   { id: 'sky', label: 'Sky', icon: 'sun' },

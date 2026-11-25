@@ -14,6 +14,7 @@ import { TerrainManager } from '../terrain/terrain-manager';
 import { WATER_LEVEL } from '../terrain/heightfield';
 import { VegetationLayer, SceneryLayer } from '../environment/vegetation';
 import { Atmosphere } from '../environment/atmosphere';
+import { fromGrid, toGrid, type GridFrame } from '../track/grid';
 import { Water } from '../environment/water';
 import { WeatherParticles } from '../environment/weather';
 import { Station } from '../environment/station';
@@ -30,6 +31,7 @@ export type PickResult =
   | { type: 'end' }
   | { type: 'height' }
   | { type: 'node'; id: string; index: number }
+  | { type: 'track'; node: number }
   | { type: 'ground'; point: V3 }
   | { type: 'none' };
 
@@ -316,7 +318,7 @@ export class Engine {
   }
 
   /** Show a translucent preview of proposed track (or clear it). Committed geometry is untouched. */
-  setPreview(design: TrackDesign | null): void {
+  setPreview(design: TrackDesign | null, range?: { fromNode: number; toNode: number }): void {
     this.previewDesign = design;
     if (!design || design.nodes.length < 2) {
       this.previewTrack = null;
@@ -326,10 +328,15 @@ export class Engine {
     }
     this.previewTrack = new BakedTrack(design, 0.25);
     const committedNodes = this.design?.nodes.length ?? 0;
-    const from = committedNodes >= 1 && committedNodes <= design.nodes.length ? this.previewTrack.nodeS[Math.max(0, committedNodes - 1)] ?? 0 : 0;
-    this.previewRenderer.update(this.previewTrack, design.style, from);
+    // By default the ghost is whatever extends past the committed track; edit mode can instead
+    // highlight a range of nodes (a selected piece, or a re-flowed section).
+    const fromNode = range ? range.fromNode : committedNodes - 1;
+    const toNode = range ? range.toNode : design.nodes.length - 1;
+    const from = fromNode >= 0 ? (this.previewTrack.nodeS[fromNode] ?? 0) : 0;
+    const to = this.previewTrack.nodeS[toNode] ?? Infinity;
+    this.previewRenderer.update(this.previewTrack, design.style, from, toNode >= design.nodes.length - 1 ? Infinity : to);
     // A slim pole from the ghost's end down to the ground shows how high it will be.
-    const end = design.nodes[design.nodes.length - 1]!.p;
+    const end = design.nodes[Math.min(design.nodes.length - 1, Math.max(0, toNode))]!.p;
     const gy = this.terrain.heightAt(end[0], end[2]);
     const h = Math.max(0.05, end[1] - gy);
     this.ghostPole.position.set(end[0], gy + h / 2, end[2]);
@@ -392,6 +399,42 @@ export class Engine {
       }
     }
     return best;
+  }
+
+  private gridLines: THREE.LineSegments | null = null;
+  private readonly gridMat = new THREE.LineBasicMaterial({ color: '#FBF4E6', transparent: true, opacity: 0.5, depthWrite: false });
+
+  /** Show the building grid on the ground around a point (edit mode only), or hide it. */
+  setGrid(frame: GridFrame | null, centre?: V3): void {
+    if (this.gridLines) {
+      this.scene.remove(this.gridLines);
+      this.gridLines.geometry.dispose();
+      this.gridLines = null;
+    }
+    if (!frame || !centre) return;
+    const { u, v } = toGrid(frame, centre[0], centre[2]);
+    const cu = Math.round(u);
+    const cv = Math.round(v);
+    const N = 7;
+    const seg = 4;
+    const pts: number[] = [];
+    const add = (u0: number, v0: number, u1: number, v1: number) => {
+      for (let k = 0; k < seg; k++) {
+        const a = fromGrid(frame, u0 + ((u1 - u0) * k) / seg, v0 + ((v1 - v0) * k) / seg);
+        const b = fromGrid(frame, u0 + ((u1 - u0) * (k + 1)) / seg, v0 + ((v1 - v0) * (k + 1)) / seg);
+        pts.push(a.x, this.terrain.heightAt(a.x, a.z) + 0.12, a.z, b.x, this.terrain.heightAt(b.x, b.z) + 0.12, b.z);
+      }
+    };
+    for (let i = -N; i <= N; i++)
+      for (let j = -N; j < N; j++) {
+        add(cu + i, cv + j, cu + i, cv + j + 1);
+        add(cu + j, cv + i, cu + j + 1, cv + i);
+      }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    this.gridLines = new THREE.LineSegments(geo, this.gridMat);
+    this.gridLines.renderOrder = 1;
+    this.scene.add(this.gridLines);
   }
 
   /** Hold the train in the station (edit mode), or let it run again. */
@@ -675,6 +718,29 @@ export class Engine {
     if (this.buildMode && this.handles.visible && this.handles.end) {
       const e = this.handles.end;
       if (this.project(e, this.scr) && this.scr.distanceTo({ x, y }) < HANDLE_PX) return { type: 'end' };
+    }
+    if (this.design && this.buildMode && this.track) {
+      // Edit mode: tap anywhere along the player's own track to select that piece.
+      const t = this.track;
+      const userEnd = t.nodeS[this.design.nodes.length - 1] ?? 0;
+      let bestS = -1;
+      let bdist = 34;
+      for (let i = 0; i < t.count; i += 4) {
+        const s = i * t.ds;
+        if (s > userEnd) break;
+        if (!this.project([t.pos[i * 3]!, t.pos[i * 3 + 1]!, t.pos[i * 3 + 2]!], this.scr)) continue;
+        const dd = this.scr.distanceTo({ x, y });
+        if (dd < bdist) {
+          bdist = dd;
+          bestS = s;
+        }
+      }
+      if (bestS >= 0) {
+        let seg = 0;
+        while (seg + 1 < t.nodeS.length && t.nodeS[seg + 1]! <= bestS) seg++;
+        // Segment seg runs into node seg+1, which belongs to the piece that was tapped.
+        return { type: 'track', node: Math.min(this.design.nodes.length - 1, seg + 1) };
+      }
     }
     if (this.design && this.buildMode) {
       let best = -1;

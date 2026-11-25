@@ -220,7 +220,8 @@ export interface NextPiece {
 export function planNext(design: TrackDesign, choice: BuildChoice, ground: (x: number, z: number) => number, committed?: BakedTrack | null): NextPiece {
   const base = opened(design);
   const g = gridFrame(base);
-  const group = newGroup();
+  // The group name records what the piece was built as, so it can be changed later in edit mode.
+  const group = `${newGroup()}~${encodeChoice(choice)}`;
   const d = cloneDesign(base);
   d.closed = false;
   const start = d.nodes.length;
@@ -323,6 +324,72 @@ export function adjustPiece(design: TrackDesign, active: ActivePiece, patch: Rec
 
 export function removePiece(design: TrackDesign): TrackDesign {
   return removeLastPiece(opened(design));
+}
+
+// ------------------------------------------------------------------ editing existing pieces
+
+export function encodeChoice(c: BuildChoice): string {
+  return c.kind === 'track' ? `t${c.turn},${c.slope}` : `s:${c.id}`;
+}
+
+/** What a piece was built as (null for pieces from older coasters or the starter layout). */
+export function decodeChoice(group: string | undefined): BuildChoice | null {
+  const m = group ? /~(?:t(-?[01]),(-?[01])|s:([a-z]+))$/.exec(group) : null;
+  if (!m) return null;
+  if (m[3]) return SPECIALS.includes(m[3] as PieceId) ? { kind: 'special', id: m[3] as PieceId } : null;
+  return { kind: 'track', turn: Number(m[1]) as Turn, slope: Number(m[2]) as Slope };
+}
+
+export interface PieceInfo {
+  group: string;
+  /** Index of the piece's first node. */
+  start: number;
+  /** Index of its last node. */
+  end: number;
+  choice: BuildChoice | null;
+}
+
+/** The player's pieces in order (the station is not a piece). */
+export function piecesOf(design: TrackDesign): PieceInfo[] {
+  const out: PieceInfo[] = [];
+  design.nodes.forEach((n, i) => {
+    if (!n.group || n.group === 'station') return;
+    const last = out[out.length - 1];
+    if (last && last.group === n.group) last.end = i;
+    else out.push({ group: n.group, start: i, end: i, choice: decodeChoice(n.group) });
+  });
+  return out;
+}
+
+/**
+ * Change (or remove, with `choice` null) the piece `group`, then rebuild every piece after it in
+ * order so the track flows on from the new shape, all on the grid. Pieces from older layouts
+ * that can't be rebuilt are dropped from that point (reported in `dropped`).
+ */
+export function replacePiece(design: TrackDesign, group: string, choice: BuildChoice | null, ground: (x: number, z: number) => number, committed?: BakedTrack | null): { design: TrackDesign; start: number; dropped: number } {
+  const pieces = piecesOf(design);
+  const k = pieces.findIndex((p) => p.group === group);
+  if (k < 0) return { design, start: design.nodes.length, dropped: 0 };
+  const start = pieces[k]!.start;
+  let d: TrackDesign = { ...cloneDesign(design), closed: false };
+  d.nodes = d.nodes.slice(0, start);
+  const tail = d.nodes[d.nodes.length - 1];
+  if (tail && tail.group !== 'station') {
+    tail.kind = 'track';
+    tail.param = undefined;
+  }
+  let dropped = 0;
+  const later = pieces.slice(k + 1);
+  const seq: BuildChoice[] = choice ? [choice] : [];
+  for (const p of later) {
+    if (!p.choice) {
+      dropped = later.length - later.indexOf(p);
+      break;
+    }
+    seq.push(p.choice);
+  }
+  for (const c of seq) d = planNext(d, c, ground, committed).design;
+  return { design: d, start, dropped };
 }
 
 /** Clamp a parameter to the preset's allowed range. */

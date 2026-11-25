@@ -8,8 +8,9 @@ import { gridFrame, onGrid, toGrid } from '../engine/track/grid';
 import { MIN_VERTICAL } from '../engine/track/clearance';
 import { TrainSim } from '../engine/physics/train-sim';
 import { DEFAULT_PHYSICS } from '../engine/train/config';
-import { SPECIALS, freshCoaster, planNext, removePiece, type BuildChoice } from '../features/builder/simple-builder';
+import { SPECIALS, decodeChoice, freshCoaster, piecesOf, planNext, removePiece, replacePiece, type BuildChoice } from '../features/builder/simple-builder';
 import { cfg } from './physics/helpers';
+import type { TrackDesign } from '../engine/track/types';
 
 const hf = new Heightfield('meadow', 2026);
 const ground = (x: number, z: number) => hf.height(x, z);
@@ -130,6 +131,68 @@ describe('edit mode builds on the grid', () => {
       }
     }
   }, 120_000);
+
+  test('changing or removing a piece in the middle re-flows the rest, on the grid and clash-free', () => {
+    let d = starterPlayable(PAD_HEIGHT + 1);
+    const built: BuildChoice[] = [
+      { kind: 'track', turn: 0, slope: 1 },
+      { kind: 'track', turn: 1, slope: 0 },
+      { kind: 'track', turn: 0, slope: 0 },
+      { kind: 'track', turn: -1, slope: -1 },
+      { kind: 'track', turn: 0, slope: 0 },
+    ];
+    for (const c of built) d = planNext(d, c, ground).design;
+    const mine = piecesOf(d).filter((p) => p.choice);
+    expect(mine.map((p) => p.choice)).toEqual(built);
+    // Change the second piece into a loop: same number of pieces, the rest keep their choices.
+    const r = replacePiece(d, mine[1]!.group, { kind: 'special', id: 'loop' }, ground);
+    const after = piecesOf(r.design).filter((p) => p.choice);
+    expect(after.map((p) => p.choice)).toEqual([built[0], { kind: 'special', id: 'loop' }, ...built.slice(2)]);
+    expect(r.dropped).toBe(0);
+    const end = r.design.nodes[r.design.nodes.length - 1]!;
+    expect(onGrid(gridFrame(r.design), end.p, end.dir)).toBe(true);
+    // Earlier track is untouched.
+    expect(JSON.stringify(r.design.nodes.slice(0, mine[1]!.start).map((n) => n.p))).toBe(JSON.stringify(d.nodes.slice(0, mine[1]!.start).map((n) => n.p)));
+    // Remove the third piece: one fewer, order kept.
+    const rm = replacePiece(r.design, after[2]!.group, null, ground);
+    expect(piecesOf(rm.design).filter((p) => p.choice).map((p) => p.choice)).toEqual([built[0], { kind: 'special', id: 'loop' }, ...built.slice(3)]);
+    const t = new BakedTrack(withReturn(rm.design, { groundAt: ground, speed: 15 }));
+    expect(worstClash(t)).toBeGreaterThanOrEqual(MIN_VERTICAL - 0.6);
+    expect(t.diagnostics.seamFlip).toBe(false);
+    expect(decodeChoice('g123~t-1,1')).toEqual({ kind: 'track', turn: -1, slope: 1 });
+    expect(decodeChoice('p3')).toBeNull();
+  });
+
+  test('every direction/slope button changes the ghost, or reports why not (no dead buttons)', () => {
+    // At the ground, "down" can't go down: the plan says so, so the button can be disabled.
+    let d = starterPlayable(PAD_HEIGHT + 1);
+    for (let i = 0; i < 3; i++) d = planNext(d, { kind: 'track', turn: 0, slope: -1 }, ground).design;
+    const level = planNext(d, { kind: 'track', turn: 0, slope: 0 }, ground);
+    const down = planNext(d, { kind: 'track', turn: 0, slope: -1 }, ground);
+    const endY = (p: typeof level) => p.design.nodes[p.design.nodes.length - 1]!.p[1];
+    expect(Math.abs(endY(level) - endY(down)) < 0.1).toBe(down.atGround);
+    // Higher up, every slope gives a different end height.
+    const up = planNext(d, { kind: 'track', turn: 0, slope: 1 }, ground).design;
+    const a = planNext(up, { kind: 'track', turn: 0, slope: 1 }, ground);
+    const b = planNext(up, { kind: 'track', turn: 0, slope: 0 }, ground);
+    const c = planNext(up, { kind: 'track', turn: 0, slope: -1 }, ground);
+    expect(new Set([endY(a), endY(b), endY(c)].map((v) => v.toFixed(1))).size).toBe(3);
+  });
+
+  test('start blank: just the station rides as a closed circuit, and building from it works', () => {
+    const empty: TrackDesign = { ...starterPlayable(PAD_HEIGHT + 1), closed: false, nodes: [
+      { id: 'b0', p: [0, PAD_HEIGHT + 1, 0] as [number, number, number], dir: [1, 0, 0] as [number, number, number], bank: 0, kind: 'station' as const, group: 'station' },
+      { id: 'b1', p: [20, PAD_HEIGHT + 1, 0] as [number, number, number], dir: [1, 0, 0] as [number, number, number], bank: 0, kind: 'track' as const, group: 'station' },
+    ] };
+    const t0 = new BakedTrack(withReturn(empty, { groundAt: ground, speed: 8 }));
+    expect(t0.closed).toBe(true);
+    expect(t0.diagnostics.seamFlip).toBe(false);
+    let d = empty;
+    for (const c of choices.slice(0, 6)) d = planNext(d, c, ground).design;
+    const t = new BakedTrack(withReturn(d, { groundAt: ground, speed: 12 }));
+    expect(t.closed).toBe(true);
+    expect(worstClash(t)).toBeGreaterThanOrEqual(MIN_VERTICAL - 0.6);
+  });
 
   test('the ghost knows when it is at the ground and when it passes under other track', () => {
     let d = starterPlayable(PAD_HEIGHT + 1);

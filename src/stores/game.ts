@@ -67,7 +67,19 @@ export interface GameState {
   /** Edit mode: what the next piece will be. */
   buildChoice: BuildChoice;
   /** Edit mode: facts about the ghost piece, for the hint line (updated when the ghost changes). */
-  ghost: { height: number; atGround: boolean; crossing: { above: boolean; gap: number } | null } | null;
+  ghost: {
+    height: number;
+    atGround: boolean;
+    crossing: { above: boolean; gap: number } | null;
+    /** "Down" would give the same piece as "Level" (already at the ground): disable it. */
+    downBlocked: boolean;
+    /** Editing a selected piece: has the choice changed from what it is now? */
+    changed: boolean;
+    /** Older pieces after the selected one that would be removed by the change. */
+    dropped: number;
+  } | null;
+  /** Edit mode: the selected piece (its group), or null when adding to the end. */
+  editSel: string | null;
   /** Decorate mode eraser. */
   eraser: boolean;
   /** Paint mode sub-tab. */
@@ -98,7 +110,7 @@ export interface GameActions {
   toast: (text: string, action?: Toast['action']) => void;
   dismissToast: (id: number) => void;
   loadSave: (s: SaveData) => void;
-  newWorld: (opts?: { blank?: boolean; biome?: EnvironmentState['biome']; seed?: number }) => void;
+  newWorld: (opts?: { blank?: boolean; empty?: boolean; biome?: EnvironmentState['biome']; seed?: number }) => void;
   toSave: (thumbnail?: string) => SaveData;
 }
 
@@ -152,6 +164,7 @@ export const useGame = create<GameState & GameActions>()((set, get) => ({
   active: null,
   buildChoice: DEFAULT_CHOICE,
   ghost: null,
+  editSel: null,
   eraser: false,
   paintTab: 'track',
   sheetCompact: false,
@@ -240,8 +253,10 @@ export const useGame = create<GameState & GameActions>()((set, get) => ({
       saveName: opts?.blank ? 'New park' : 'Meadow park',
       coasterName: opts?.blank ? 'New coaster' : 'Bramble Flyer',
       created: Date.now(),
-      design: opts?.blank ? freshCoaster(base, PAD_HEIGHT + 1, () => PAD_HEIGHT + 0.5) : base,
+      // "Start blank": just the station. "Build your own": a station with a small lift and drop.
+      design: opts?.empty ? { ...blankDesign(base), nodes: blankDesign(base).nodes.map((n) => ({ ...n, group: 'station' })) } : opts?.blank ? freshCoaster(base, PAD_HEIGHT + 1, () => PAD_HEIGHT + 0.5) : base,
       active: null,
+      editSel: null,
       train: defaultTrain(),
       physics: {},
       env: { ...s.env, biome: opts?.biome ?? s.env.biome, seed: opts?.seed ?? s.env.seed },
