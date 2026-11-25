@@ -126,7 +126,14 @@ export function BuildTray() {
   const track = choice.kind === 'track' ? choice : null;
   // Contextual: only offer what fits smoothly here (everything shows until the check finishes).
   const specials = avail ? SPECIALS.filter((id) => avail.specials.includes(id)) : SPECIALS;
-  const slopes = SLOPES.filter((sl) => sl.slope !== -1 || !(ghost?.downBlocked || (avail && avail.down[track?.turn ?? 0] === false)));
+  const fits = (turn: Turn, slope: Slope) => !avail || avail.track[`${turn},${slope}`] !== false;
+  const directions = DIRECTIONS.filter((d) => SLOPES.some((sl) => fits(d.turn, sl.slope)));
+  const slopes = SLOPES.filter((sl) => fits(track?.turn ?? 0, sl.slope) && (sl.slope !== -1 || !ghost?.downBlocked));
+  // Keep the slope when changing direction if it still fits there, otherwise take the first that does.
+  const slopeFor = (turn: Turn): Slope => {
+    const want = track?.slope ?? 0;
+    return fits(turn, want) ? want : (SLOPES.find((sl) => fits(turn, sl.slope))?.slope ?? 0);
+  };
   const pick = (turn: Turn, slope: Slope) => chooseBuild({ kind: 'track', turn, slope });
   return (
     <Tray label="Edit track">
@@ -147,10 +154,11 @@ export function BuildTray() {
           Done
         </button>
       </div>
-      <div className="cc-build">
-        <div className="cc-seg" role="group" aria-label="Direction">
-          {DIRECTIONS.map((d) => (
-            <button key={d.turn} type="button" className={track?.turn === d.turn ? 'on' : ''} aria-pressed={track?.turn === d.turn} onClick={() => pick(d.turn, track?.slope ?? 0)}>
+      {directions.length > 0 && (
+        <div className="cc-build">
+          <div className="cc-seg" role="group" aria-label="Direction">
+            {directions.map((d) => (
+              <button key={d.turn} type="button" className={track?.turn === d.turn ? 'on' : ''} aria-pressed={track?.turn === d.turn} onClick={() => pick(d.turn, slopeFor(d.turn))}>
               <Icon name={d.icon} size={24} />
               <span>{d.label}</span>
             </button>
@@ -165,6 +173,7 @@ export function BuildTray() {
           ))}
         </div>
       </div>
+      )}
       <Row label="Special pieces">
         {specials.map((id) => {
           const p = pieceById(id);

@@ -50,21 +50,27 @@ async function audit(page, ctx) {
     if (t) {
       let maxY = -1e9, minClear = 1e9;
       for (let i = 0; i < t.count; i++) maxY = Math.max(maxY, t.pos[i * 3 + 1]);
-      let worst = 1e9;
+      let worst = 1e9, clashAt = '';
       const step = 8;
       for (let i = 0; i < t.count; i += step) for (let j = i + step; j < t.count; j += step) {
         let ds = (j - i) * t.ds; if (t.closed) ds = Math.min(ds, t.length - ds);
         if (ds < 40) continue;
         const dx = t.pos[i * 3] - t.pos[j * 3], dz = t.pos[i * 3 + 2] - t.pos[j * 3 + 2];
         if (dx * dx + dz * dz > 6.25) continue;
-        worst = Math.min(worst, Math.abs(t.pos[i * 3 + 1] - t.pos[j * 3 + 1]));
+        const gap = Math.abs(t.pos[i * 3 + 1] - t.pos[j * 3 + 1]);
+        if (gap < worst) { worst = gap; clashAt = `s=${(i * t.ds).toFixed(0)} & ${(j * t.ds).toFixed(0)} of ${t.length.toFixed(0)}`; }
       }
       for (let i = 0; i < t.count; i += 4) {
         const gy = e.terrain.heightAt(t.pos[i * 3], t.pos[i * 3 + 2]);
         minClear = Math.min(minClear, t.pos[i * 3 + 1] - gy);
       }
-      let maxTwist = 0;
-      for (let i = 1; i < t.count; i++) maxTwist = Math.max(maxTwist, Math.abs(t.bank[i] - t.bank[i - 1]) / t.ds);
+      let maxTwist = 0, twistAt = '';
+      for (let i = 1; i < t.count; i++) {
+        let db = t.bank[i] - t.bank[i - 1];
+        db = Math.atan2(Math.sin(db), Math.cos(db)); // a roll through ±π is not a jump
+        const w = Math.abs(db) / t.ds;
+        if (w > maxTwist) { maxTwist = w; twistAt = `at s=${(i * t.ds).toFixed(0)}/${t.length.toFixed(0)} bank ${t.bank[i - 1].toFixed(2)}→${t.bank[i].toFixed(2)} kind ${t.kind[i]}`; }
+      }
       // In build mode the newest piece's end must be visible in the clear area.
       const st = window.__cozy.store.getState();
       if (st.panel === 'build' && st.camera === 'orbit') {
@@ -77,7 +83,7 @@ async function audit(page, ctx) {
         const bottom = dock && dock.width > innerWidth * 0.6 ? dock.top : innerHeight;
         if (sx < 10 || sx > innerWidth - 10 || sy < top || sy > bottom) out.ui.push(`newest piece (ghost) not in clear view (${Math.round(sx)},${Math.round(sy)})`);
       }
-      out.track = { closed: t.closed, length: t.length, maxY, clash: worst, minClear, seamFlip: t.diagnostics.seamFlip, gap: t.diagnostics.maxGap, twist: maxTwist, cam: window.__cozy.store.getState().camera };
+      out.track = { closed: t.closed, length: t.length, maxY, clash: worst, clashAt, minClear, seamFlip: t.diagnostics.seamFlip, gap: t.diagnostics.maxGap, twist: maxTwist, twistAt, cam: window.__cozy.store.getState().camera };
     }
     return out;
   });
@@ -87,10 +93,10 @@ async function audit(page, ctx) {
     if (!t.closed) note(ctx, `track not closed after ${ctx.step}`);
     if (t.seamFlip) note(ctx, `track flips upside down after ${ctx.step}`);
     if (t.gap > 1e-3) note(ctx, `track gap ${t.gap} after ${ctx.step}`);
-    if (t.clash < 4.9) note(ctx, `TRACK CLASH gap ${t.clash.toFixed(2)} m after ${ctx.step}`);
+    if (t.clash < 4.9) note(ctx, `TRACK CLASH gap ${t.clash.toFixed(2)} m ${t.clashAt} after ${ctx.step}`);
     if (t.maxY > 70) note(ctx, `track very high (${t.maxY.toFixed(0)} m) after ${ctx.step}`);
     if (t.minClear < 0.3) note(ctx, `track touches/under ground (${t.minClear.toFixed(2)} m) after ${ctx.step}`);
-    if (t.twist > 0.7) note(ctx, `sudden twist ${t.twist.toFixed(2)} rad/m after ${ctx.step}`);
+    if (t.twist > 0.7) note(ctx, `sudden twist ${t.twist.toFixed(2)} rad/m ${t.twistAt} after ${ctx.step}`);
   }
   return r;
 }

@@ -3,7 +3,7 @@ import type { SimEvent } from '../engine/physics/train-sim';
 import type { V3 } from '../engine/core/vec3';
 import { useGame } from '../stores/game';
 import { planDragToPiece } from '../features/builder/builder';
-import { SPECIALS, addPiece, adjustPiece, clampParam, pieceById, piecesOf, planNext, removePiece, replacePiece, type BuildChoice, type NextPiece, type PieceId } from '../features/builder/simple-builder';
+import { SPECIALS, addPiece, adjustPiece, clampParam, pieceById, piecesOf, planNext, removePiece, replacePiece, type BuildChoice, type NextPiece, type PieceId, type Slope, type Turn } from '../features/builder/simple-builder';
 import { gridFrame } from '../engine/track/grid';
 import type { PieceSound } from '../engine/audio/sounds';
 import { TIMBER_STYLES } from '../engine/supports/support-gen';
@@ -164,8 +164,8 @@ export function refreshGhost(): void {
 let availToken = 0;
 /**
  * Work out which options fit smoothly where you're building, a few per frame so the panel stays
- * responsive. Options that don't fit are hidden; a chosen option that stops fitting falls back to
- * a level straight.
+ * responsive. Options that don't fit are hidden; a chosen option that stops fitting moves to one
+ * that does.
  */
 export function refreshAvailability(): void {
   const token = ++availToken;
@@ -175,20 +175,26 @@ export function refreshAvailability(): void {
   const sel = g0.editSel ? pieces.find((p) => p.group === g0.editSel) : null;
   const base: TrackDesign = sel ? { ...g0.design, nodes: g0.design.nodes.slice(0, sel.start) } : g0.design;
   const jobs: Array<() => void> = [];
-  const specials: string[] = [];
-  const down: Record<string, boolean> = {};
+  const specials: PieceId[] = [];
+  const track: Record<string, boolean> = {};
   const committed = services.engine?.track;
   const needSpeed: string[] = [];
   const needHeight: string[] = [];
+  let trackSpeed = false;
+  // Plain track first (the default choice), then the specials.
+  for (const slope of [0, 1, -1] as const)
+    for (const turn of [0, -1, 1] as const)
+      jobs.push(() => {
+        const p = planNext(base, { kind: 'track', turn, slope }, ground, committed);
+        const ok = !p.blocked && !(slope === -1 && p.atGround);
+        track[`${turn},${slope}`] = ok;
+        if (!ok && p.blocked && /speed/.test(p.blocked)) trackSpeed = true;
+      });
   for (const id of SPECIALS) jobs.push(() => {
     const b = planNext(base, { kind: 'special', id }, ground, committed).blocked;
     if (!b) specials.push(id);
     else if (/speed/.test(b)) needSpeed.push(pieceById(id).label);
     else if (/height/.test(b)) needHeight.push(pieceById(id).label);
-  });
-  for (const turn of [-1, 0, 1] as const) jobs.push(() => {
-    const p = planNext(base, { kind: 'track', turn, slope: -1 }, ground, committed);
-    down[turn] = !p.atGround && !p.blocked;
   });
   const step = () => {
     if (token !== availToken) return; // the track changed again: start over
@@ -206,14 +212,30 @@ export function refreshAvailability(): void {
     }
     const g = useGame.getState();
     const c = g.buildChoice;
-    const stillOk = c.kind === 'special' ? specials.includes(c.id) : c.slope >= 0 || down[c.turn] !== false;
+    const anyTrack = Object.values(track).some(Boolean);
+    const stillOk = c.kind === 'special' ? specials.includes(c.id) : track[`${c.turn},${c.slope}`] !== false;
+    // If the current choice doesn't fit, pick something that does: same direction, then any track, then a special.
+    let next: BuildChoice | null = null;
+    if (!stillOk) {
+      const turn = c.kind === 'track' ? c.turn : 0;
+      const k = [`${turn},0`, `${turn},1`, `${turn},-1`, ...Object.keys(track)].find((key) => track[key]);
+      if (k) {
+        const [t, sl] = k.split(',').map(Number) as [Turn, Slope];
+        next = { kind: 'track', turn: t, slope: sl };
+      } else if (specials.length) next = { kind: 'special', id: specials[0]! };
+    }
     const list = (a: string[]) => (a.length > 1 ? `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}` : a[0]);
-    const note = needSpeed.length
-      ? `${list(needSpeed)} ${needSpeed.length > 1 ? 'need' : 'needs'} more speed: add a Lift or a Launch first`
-      : needHeight.length
-        ? `${list(needHeight)} ${needHeight.length > 1 ? 'need' : 'needs'} some height first: add a Lift`
-        : null;
-    useGame.setState({ avail: { specials, down, note }, ...(stillOk ? {} : { buildChoice: { kind: 'track' as const, turn: 0 as const, slope: 0 as const } }) });
+    const note =
+      !anyTrack && trackSpeed && specials.length
+        ? 'The train leaves the station slowly: start with a Lift or a Launch to give it speed'
+        : !anyTrack && !specials.length
+          ? 'Nothing fits here. Remove the last piece, or change an earlier one'
+          : needSpeed.length
+            ? `${list(needSpeed)} ${needSpeed.length > 1 ? 'need' : 'needs'} more speed: add a Lift or a Launch first`
+            : needHeight.length
+              ? `${list(needHeight)} ${needHeight.length > 1 ? 'need' : 'needs'} some height first: add a Lift`
+              : null;
+    useGame.setState({ avail: { specials, track, note }, ...(next ? { buildChoice: next } : {}) });
   };
   requestAnimationFrame(step);
 }
@@ -243,7 +265,9 @@ export function addGhost(): void {
     announce('Piece changed.');
     return;
   }
-  const plan = ghostPlan ?? planNext(g.design, g.buildChoice, ground, services.engine?.track);
+  // Always plan against the track as it is now (memoised, so this is the ghost's own plan when it is
+  // up to date), so a quick second tap never commits a plan made for the previous track.
+  const plan = planNext(g.design, g.buildChoice, ground, services.engine?.track);
   if (plan.blocked) return; // never build anything rough
   g.commitDesign(plan.design);
   services.engine?.audio.piece(pieceSound(g.buildChoice));

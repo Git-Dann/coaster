@@ -213,6 +213,20 @@ describe('edit mode builds on the grid', () => {
     expect(worstClash(t)).toBeGreaterThanOrEqual(MIN_VERTICAL - 0.6);
   });
 
+  test('from a lone station, something can always be built: a Lift or a Launch gets the train going', () => {
+    const empty: TrackDesign = { ...starterPlayable(PAD_HEIGHT + 1), closed: false, nodes: [
+      { id: 'b0', p: [0, PAD_HEIGHT + 1, 0] as [number, number, number], dir: [1, 0, 0] as [number, number, number], bank: 0, kind: 'station' as const, group: 'station' },
+      { id: 'b1', p: [20, PAD_HEIGHT + 1, 0] as [number, number, number], dir: [1, 0, 0] as [number, number, number], bank: 0, kind: 'track' as const, group: 'station' },
+    ] };
+    const lift = planNext(empty, { kind: 'special', id: 'lift' }, ground);
+    const launch = planNext(empty, { kind: 'special', id: 'launch' }, ground);
+    expect(lift.blocked === null || launch.blocked === null).toBe(true);
+    // After a Lift, plain track fits.
+    const d = (lift.blocked === null ? lift : launch).design;
+    const ok = choices.filter((c) => c.kind === 'track' && !planNext(d, c, ground).blocked);
+    expect(ok.length).toBeGreaterThan(0);
+  });
+
   test('a drop at ground level is not offered (it needs height), and is offered once there is height', () => {
     let d = starterPlayable(PAD_HEIGHT + 1);
     for (let i = 0; i < 3; i++) d = planNext(d, { kind: 'track', turn: 0, slope: -1 }, ground).design;

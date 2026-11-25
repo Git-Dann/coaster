@@ -85,7 +85,8 @@ export interface GameState {
   /** Edit mode: the selected piece (its group), or null when adding to the end. */
   editSel: string | null;
   /** Edit mode: which options fit smoothly where you are building (others are hidden). */
-  avail: { specials: string[]; down: Record<string, boolean>; note: string | null } | null;
+  /** What fits at the current build point: usable specials, and usable track options keyed `turn,slope`. */
+  avail: { specials: string[]; track: Record<string, boolean>; note: string | null } | null;
   /** Decorate mode eraser. */
   eraser: boolean;
   /** Paint mode sub-tab. */
