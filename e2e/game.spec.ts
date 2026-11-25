@@ -140,14 +140,18 @@ test('edit mode: no dead buttons, select and change a piece in the middle, remov
   const xy = await page.evaluate(() => {
     const e = (window as any).__cozy.engine;
     const d = (window as any).__cozy.store.getState().design;
-    // A player taps track they can see: the first built node (from the end) that is on the open canvas.
-    for (let i = d.nodes.length - 2; i >= 0; i--) {
-      if (d.nodes[i].group === 'station') continue;
-      const p = d.nodes[i].p;
-      const v = new e.rig.camera.position.constructor(p[0], p[1], p[2]).project(e.rig.camera);
+    // A player taps track they can see: anywhere along their built pieces (past the station, before
+    // the newest piece's end) that is on the open canvas.
+    const t = e.track;
+    const firstBuilt = d.nodes.findIndex((n: { group?: string }) => n.group && n.group !== 'station');
+    const from = t.nodeS[Math.max(0, firstBuilt - 1)] + 2;
+    const to = t.nodeS[d.nodes.length - 1] - 2;
+    for (let s = to; s > from; s -= 1) {
+      const i = Math.round(s / t.ds);
+      const v = new e.rig.camera.position.constructor(t.pos[i * 3], t.pos[i * 3 + 1], t.pos[i * 3 + 2]).project(e.rig.camera);
       const x = ((v.x + 1) / 2) * innerWidth;
       const y = ((1 - v.y) / 2) * innerHeight;
-      if (v.z < 1 && document.elementFromPoint(x, y)?.classList.contains('cc-canvas')) return [x, y];
+      if (v.z < 1 && x > 8 && x < innerWidth - 8 && document.elementFromPoint(x, y)?.classList.contains('cc-canvas')) return [x, y];
     }
     return null;
   });
