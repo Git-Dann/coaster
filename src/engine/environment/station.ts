@@ -25,18 +25,26 @@ export class Station {
     for (const l of this.lights) l.intensity = n * 6;
   }
 
+  private builtKey = '';
+
   build(track: BakedTrack | null, ground: (x: number, z: number) => number): void {
-    for (const c of [...this.group.children]) {
-      this.group.remove(c);
-      (c as THREE.Mesh).geometry?.dispose();
-    }
+    const iv = track?.intervalsOf('station')[0];
+    const a = iv && track ? track.sample(iv[0], newSample()) : null;
+    const b = iv && track ? track.sample(Math.min(iv[1], track.closed ? iv[1] : track.length), newSample()) : null;
+    // The station only depends on where the platform is (and the ground under it): editing the rest
+    // of the coaster must not rebuild it.
+    const key = a && b ? `${a.pos.map((v) => v.toFixed(2))}|${b.pos.map((v) => v.toFixed(2))}|${ground(a.pos[0], a.pos[2]).toFixed(2)}` : '';
+    if (key === this.builtKey) return;
+    this.builtKey = key;
+    // Free every mesh, including those nested in sub-groups (the old code only freed direct children,
+    // leaking ~90 geometries per track edit until phones ran out of GPU memory and reloaded the page).
+    this.group.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) m.geometry.dispose();
+    });
+    for (const c of [...this.group.children]) this.group.remove(c);
     this.lights = [];
-    if (!track) return;
-    const iv = track.intervalsOf('station')[0];
-    if (!iv) return;
-    const [s0, s1] = iv;
-    const a = track.sample(s0, newSample());
-    const b = track.sample(Math.min(s1, track.closed ? s1 : track.length), newSample());
+    if (!track || !a || !b) return;
     const len = Math.hypot(b.pos[0] - a.pos[0], b.pos[2] - a.pos[2]);
     if (len < 4) return;
     const heading = Math.atan2(-(b.pos[2] - a.pos[2]), b.pos[0] - a.pos[0]);
