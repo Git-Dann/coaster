@@ -291,6 +291,8 @@ export class SceneryLayer {
     }
     for (const [k, mesh] of this.meshes) {
       mesh.count = counts.get(k) ?? 0;
+      // Nothing placed of this kind (or shape): skip it entirely, shadows included.
+      mesh.visible = mesh.count > 0;
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     }
