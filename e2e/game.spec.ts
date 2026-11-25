@@ -192,6 +192,16 @@ test('a two-finger pinch moves the camera and never builds', async ({ page }) =>
   await ready(page);
   await page.getByRole('button', { name: 'Explore the meadow' }).click();
   await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  // Opening Edit frames the newest piece (and re-fits once the panel has slid in): let it settle.
+  await expect
+    .poll(async () => {
+      const a = await page.evaluate(() => (window as any).__cozy.engine.rig.distance);
+      await page.waitForTimeout(400);
+      const b = await page.evaluate(() => (window as any).__cozy.engine.rig.distance);
+      return Math.abs(a - b) < 0.05;
+    }, { timeout: 15_000 })
+    .toBe(true);
+  await page.waitForTimeout(2200);
   const before = await page.evaluate(() => ({ n: (window as any).__cozy.store.getState().design.nodes.length, d: (window as any).__cozy.engine.rig.distance }));
   await page.evaluate(async () => {
     const c = document.querySelector('canvas')!;

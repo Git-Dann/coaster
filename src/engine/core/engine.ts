@@ -213,10 +213,11 @@ export class Engine {
       dragEnd: (x, y, c) => this.dragEnd(x, y, c),
       tap: (x, y) => this.cb.onTap(this.pick(x, y)),
       hover: () => {},
-      orbit: (dx, dy) => this.rig.orbitBy(dx, dy, this.canvas.clientHeight),
-      pan: (dx, dy) => this.rig.panBy(dx, dy, this.canvas.clientHeight),
-      zoom: (f) => this.rig.zoomBy(f),
-      rotate: (da) => (this.rig.yaw += da),
+      // Moving the camera yourself always wins: no automatic re-fit afterwards.
+      orbit: (dx, dy) => ((this.lastFrame = null), this.rig.orbitBy(dx, dy, this.canvas.clientHeight)),
+      pan: (dx, dy) => ((this.lastFrame = null), this.rig.panBy(dx, dy, this.canvas.clientHeight)),
+      zoom: (f) => ((this.lastFrame = null), this.rig.zoomBy(f)),
+      rotate: (da) => ((this.lastFrame = null), (this.rig.yaw += da)),
       interact: () => {
         void this.audio.unlock();
         if (this.rig.mode === 'relax' && !(this.settings?.accessibility.disableAutoCamera ?? false)) {
@@ -599,10 +600,13 @@ export class Engine {
     const moved = Math.abs(next.top - old.top) + Math.abs(next.bottom - old.bottom) + Math.abs(next.left - old.left) + Math.abs(next.right - old.right) > 24;
     this.insets = next;
     // A panel opened or closed after a piece was framed: fit it again to the new clear area.
-    if (moved && this.lastFrame && this.buildMode) this.frameSphere(this.lastFrame.centre, this.lastFrame.radius, this.lastFrame.min);
+    // Only just after the view framed a piece (the panel was still opening), and never once
+    // you've moved the camera yourself.
+    const f = this.lastFrame;
+    if (moved && f && this.buildMode && performance.now() - f.at < 2000) this.frameSphere(f.centre, f.radius, f.min, f.at);
   }
 
-  private lastFrame: { centre: V3; radius: number; min: number } | null = null;
+  private lastFrame: { centre: V3; radius: number; min: number; at: number } | null = null;
 
   /** Shift the projection so the camera's aim point sits in the middle of the clear area. */
   private applyViewOffset(): void {
@@ -628,8 +632,8 @@ export class Engine {
    * Glide the build camera so a sphere (a piece of track) fits in the clear part of the screen,
    * the area not covered by the panels: centred there, and far enough back that it all shows.
    */
-  frameSphere(centre: V3, radius: number, minDistance = 30): void {
-    this.lastFrame = { centre, radius, min: minDistance };
+  frameSphere(centre: V3, radius: number, minDistance = 30, at = performance.now()): void {
+    this.lastFrame = { centre, radius, min: minDistance, at };
     if (this.rig.mode !== 'orbit') return;
     const w = Math.max(1, this.canvas.clientWidth);
     const h = Math.max(1, this.canvas.clientHeight);
