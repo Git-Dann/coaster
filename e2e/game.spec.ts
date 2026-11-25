@@ -134,7 +134,16 @@ test('carriages change at any time, even mid-ride; timber, rain and riding all w
   await expect.poll(() => page.evaluate(() => (window as any).__cozy.engine.atmosphere.state.rain), { timeout: 15_000 }).toBeGreaterThan(0.3);
   await page.getByRole('button', { name: 'Ride', exact: true }).click();
   await page.getByRole('button', { name: 'Ride!' }).click();
-  expect(await page.evaluate(() => (window as any).__cozy.store.getState().camera)).toBe('front');
+  const cam = () => page.evaluate(() => (window as any).__cozy.store.getState().camera);
+  expect(await cam()).toBe('front');
+  // Riding puts the sheet away for a clear view; opening and closing it never ends the ride.
+  await expect(page.getByRole('button', { name: 'Ride!' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Ride', exact: true }).click();
+  await page.getByRole('button', { name: 'Watch' }).click();
+  expect(await cam()).not.toBe('orbit');
+  await page.getByRole('button', { name: 'Ride', exact: true }).click();
+  await page.getByRole('button', { name: 'Ride', exact: true }).click();
+  expect(await cam()).not.toBe('orbit');
   await page.waitForTimeout(2500);
   await page.screenshot({ path: `test-results/visual/${test.info().project.name}-rain-six-cars.png` });
 });

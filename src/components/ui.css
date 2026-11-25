@@ -903,13 +903,22 @@
   display: flex;
   gap: 10px;
   overflow-x: auto;
-  padding: 2px 12px 4px;
+  padding: 2px 16px 4px;
+  /* Keep a margin at both ends when scrolled or snapped (Safari ignores end padding in a flex scroller). */
+  scroll-padding-inline: 16px;
+  /* Cards scrolled to the edge fade out softly instead of butting against the sheet's edge. */
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
   scroll-snap-type: x proximity;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
 }
 .cc-row-scroll::-webkit-scrollbar {
   display: none;
+}
+.cc-row-scroll::after {
+  content: '';
+  flex: 0 0 6px;
 }
 .cc-card {
   flex: 0 0 auto;

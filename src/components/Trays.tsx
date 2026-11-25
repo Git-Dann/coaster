@@ -45,7 +45,13 @@ function Row(props: { children: ReactNode; label: string }) {
   useEffect(() => {
     const row = ref.current;
     const on = row?.querySelector<HTMLElement>('.on');
-    if (row && on) row.scrollLeft = Math.max(0, on.offsetLeft - row.clientWidth / 2 + on.clientWidth / 2);
+    if (!row || !on) return;
+    // Scroll only as far as needed to show it, keeping a comfortable margin from the edge.
+    const margin = 16;
+    const left = on.offsetLeft - margin;
+    const right = on.offsetLeft + on.clientWidth + margin - row.clientWidth;
+    if (row.scrollLeft > left) row.scrollLeft = Math.max(0, left);
+    else if (row.scrollLeft < right) row.scrollLeft = right;
   }, []);
   return (
     <div ref={ref} className="cc-row-scroll" role="group" aria-label={props.label}>
@@ -442,7 +448,8 @@ export function SkyTray() {
 
 // ------------------------------------------------------------------ Ride
 
-const WATCH: CameraMode[] = ['follow', 'side', 'cinematic', 'trackside'];
+// The wide view first: it never starts inside the station building.
+const WATCH: CameraMode[] = ['cinematic', 'follow', 'side', 'trackside'];
 
 export function RideTray() {
   const camera = useGame((s) => s.camera);
@@ -458,7 +465,8 @@ export function RideTray() {
           on={camera === 'front'}
           onClick={() => {
             ui('success');
-            useGame.setState({ camera: 'front' });
+            // Put the sheet away so the ride fills the screen; the Ride button brings it back.
+            useGame.setState({ camera: 'front', panel: 'none' });
             services.engine?.dispatch();
           }}
         />
@@ -469,10 +477,10 @@ export function RideTray() {
           onClick={() => {
             ui('select');
             const next = WATCH[(WATCH.indexOf(camera) + 1) % WATCH.length]!;
-            useGame.setState({ camera: next });
+            useGame.setState({ camera: next, panel: 'none' });
           }}
         />
-        <Card label="Back seat" icon="train" on={camera === 'rear'} onClick={() => (ui('select'), useGame.setState({ camera: 'rear' }))} />
+        <Card label="Back seat" icon="train" on={camera === 'rear'} onClick={() => (ui('select'), useGame.setState({ camera: 'rear', panel: 'none' }))} />
         <Card label="Overview" icon="frame" on={camera === 'orbit'} onClick={() => (ui('select'), useGame.setState({ camera: 'orbit' }), services.engine?.frameCoaster())} />
         <Card label="To station" icon="reset" onClick={() => (ui('tap'), services.engine?.resetTrain())} />
         <Card label="Relax" icon="leaf" onClick={() => (ui('open'), useGame.setState({ overlay: 'relax', panel: 'none', camera: 'relax' }))} />

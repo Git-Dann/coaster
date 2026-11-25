@@ -68,7 +68,8 @@ export function BottomNav() {
               sceneryTool: null,
               brush: null,
               eraser: false,
-              ...(next !== 'ride' && cam !== 'orbit' ? { camera: 'orbit' as const } : {}),
+              // Closing the sheet never ends a ride or watch; only switching to another mode does.
+              ...(next !== 'ride' && next !== 'none' && cam !== 'orbit' ? { camera: 'orbit' as const } : {}),
             });
           }}
         >
