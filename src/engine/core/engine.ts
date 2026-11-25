@@ -594,8 +594,15 @@ export class Engine {
    * what they look at in the clear area between them, instead of behind the build sheet.
    */
   setViewInsets(top: number, bottom: number, left = 0, right = 0): void {
-    this.insets = { top: Math.max(0, top), bottom: Math.max(0, bottom), left: Math.max(0, left), right: Math.max(0, right) };
+    const next = { top: Math.max(0, top), bottom: Math.max(0, bottom), left: Math.max(0, left), right: Math.max(0, right) };
+    const old = this.insets;
+    const moved = Math.abs(next.top - old.top) + Math.abs(next.bottom - old.bottom) + Math.abs(next.left - old.left) + Math.abs(next.right - old.right) > 24;
+    this.insets = next;
+    // A panel opened or closed after a piece was framed: fit it again to the new clear area.
+    if (moved && this.lastFrame && this.buildMode) this.frameSphere(this.lastFrame.centre, this.lastFrame.radius, this.lastFrame.min);
   }
+
+  private lastFrame: { centre: V3; radius: number; min: number } | null = null;
 
   /** Shift the projection so the camera's aim point sits in the middle of the clear area. */
   private applyViewOffset(): void {
@@ -622,6 +629,7 @@ export class Engine {
    * the area not covered by the panels: centred there, and far enough back that it all shows.
    */
   frameSphere(centre: V3, radius: number, minDistance = 30): void {
+    this.lastFrame = { centre, radius, min: minDistance };
     if (this.rig.mode !== 'orbit') return;
     const w = Math.max(1, this.canvas.clientWidth);
     const h = Math.max(1, this.canvas.clientHeight);
