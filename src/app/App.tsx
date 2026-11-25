@@ -168,7 +168,10 @@ export function App() {
       switch (e.key) {
         case 'Escape':
           if (g.overlay !== 'none' && g.overlay !== 'welcome') useGame.setState({ overlay: 'none', camera: g.camera === 'relax' ? 'orbit' : g.camera });
-          else if (g.camera !== 'orbit') useGame.setState({ camera: 'orbit' });
+          else if (g.camera !== 'orbit') {
+            useGame.setState({ camera: 'orbit' });
+            services.engine?.viewNearTrain();
+          }
           else if (g.panel !== 'none') useGame.setState({ panel: 'none' });
           break;
         case 'Backspace':
