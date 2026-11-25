@@ -185,7 +185,8 @@ test('recovers from WebGL context loss without losing the world', async ({ page 
 });
 
 test('seeded visual scenes render without errors', async ({ page }) => {
-  test.setTimeout(360_000);
+  // Six full-quality scenes on CI's CPU renderer: ~4 min on a typical runner, twice that on a slow one.
+  test.setTimeout(720_000);
   await page.goto('/');
   await ready(page, true);
   await page.getByRole('button', { name: 'Explore the meadow' }).click();
