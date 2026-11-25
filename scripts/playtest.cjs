@@ -101,16 +101,20 @@ async function audit(page, ctx) {
   return r;
 }
 
+const T0 = Date.now();
 async function run(devName, devOpts) {
   const browser = await chromium.launch();
   const page = await browser.newPage(devOpts);
   const ctx = { dev: devName, step: 'load' };
   page.on('pageerror', (e) => note(ctx, `page error: ${e.message}`));
+  page.on('crash', () => note(ctx, `PAGE CRASHED during ${ctx.step}`));
   page.on('console', (m) => { if (m.type() === 'error' && !/GPU stall|WebGL-/.test(m.text())) note(ctx, `console error: ${m.text()}`); });
   let n = 0;
   const shot = async (name) => { await page.screenshot({ path: `${OUT}/${devName}-${String(n++).padStart(3, '0')}-${name}.png` }); };
   const step = async (name, fn, wait = 700) => {
     ctx.step = name;
+    const t0 = Date.now();
+    if (process.env.PT_TRACE) console.log(`[${devName}] ${name} (+${((Date.now() - T0) / 1000).toFixed(0)}s)`);
     try { await fn(); } catch (e) { note(ctx, `FAILED step "${name}": ${String(e.message).split('\n')[0]}`); }
     await page.waitForTimeout(wait);
     await audit(page, ctx);
