@@ -141,7 +141,9 @@ export function BuildTray() {
         <button type="button" className="cc-round" aria-label="Previous piece" disabled={pieces.length === 0 || k === 0} onClick={() => stepSelection(-1)}>
           <Icon name="left" size={20} />
         </button>
-        <span className="cc-build-title">{editing ? `Piece ${k + 1} of ${pieces.length}` : 'Adding to the end'}</span>
+        <span className="cc-build-title" aria-label={editing ? `Piece ${k + 1} of ${pieces.length}` : undefined}>
+          {editing ? `Piece ${k + 1}/${pieces.length}` : 'Adding to the end'}
+        </span>
         <button type="button" className="cc-round" aria-label="Next piece" disabled={!editing} onClick={() => stepSelection(1)}>
           <Icon name="right" size={20} />
         </button>

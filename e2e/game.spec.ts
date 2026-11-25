@@ -125,7 +125,7 @@ test('edit mode: no dead buttons, select and change a piece in the middle, remov
   for (let i = 0; i < 3; i++) await btn('Add piece').click();
   await btn('Previous piece').click();
   await btn('Previous piece').click();
-  await expect(page.getByText(/^Piece \d+ of \d+$/)).toBeVisible();
+  await expect(page.getByText(/^Piece \d+\/\d+$/)).toBeVisible();
   const before = await nodeCount(page);
   // Change it into something that fits here (whatever the panel offers first among the shapes).
   await page.waitForTimeout(500);
