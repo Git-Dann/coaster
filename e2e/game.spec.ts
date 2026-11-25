@@ -115,6 +115,8 @@ test('a two-finger pinch moves the camera and never builds', async ({ page }) =>
 });
 
 test('carriages change at any time, even mid-ride; timber, rain and riding all work', async ({ page }) => {
+  // Many steps (paint, supports, rain, ride, sheet open/close) on CI's CPU renderer.
+  test.setTimeout(180_000);
   await page.goto('/');
   await ready(page);
   await page.getByRole('button', { name: 'Explore the meadow' }).click();
