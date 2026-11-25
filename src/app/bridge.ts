@@ -133,7 +133,7 @@ export function refreshGhost(): void {
         e.setGrid(gridFrame(g.design), at);
         const from = g.design.nodes[Math.max(0, piece.start - 1)]!.p;
         e.lookAt([(from[0] + at[0]) / 2, (from[1] + at[1]) / 2, (from[2] + at[2]) / 2], choiceDistance(g.buildChoice));
-        useGame.setState({ ghost: { height, atGround, crossing, downBlocked: !!down?.atGround, changed, dropped } });
+        useGame.setState({ ghost: { height, atGround, crossing, downBlocked: !!down?.atGround, changed, dropped, forChoice: JSON.stringify(g.buildChoice) } });
         return;
       }
       // Adding to the end.
@@ -146,7 +146,7 @@ export function refreshGhost(): void {
       e.setPreview(ghostPlan.design);
       e.setGrid(gridFrame(ghostPlan.design), end.p);
       e.lookAt([(from.p[0] + end.p[0]) / 2, (from.p[1] + end.p[1]) / 2, (from.p[2] + end.p[2]) / 2], choiceDistance(g.buildChoice));
-      useGame.setState({ ghost: { height: ghostPlan.height, atGround: ghostPlan.atGround, crossing: ghostPlan.crossing, downBlocked: !!down?.atGround, changed: true, dropped: 0 } });
+      useGame.setState({ ghost: { height: ghostPlan.height, atGround: ghostPlan.atGround, crossing: ghostPlan.crossing, downBlocked: !!down?.atGround, changed: true, dropped: 0, forChoice: JSON.stringify(g.buildChoice) } });
     } catch (err) {
       // Never let a planning problem break the game: just show no ghost for this choice.
       console.warn('Could not plan the piece', err);

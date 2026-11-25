@@ -77,6 +77,8 @@ export interface GameState {
     changed: boolean;
     /** Older pieces after the selected one that would be removed by the change. */
     dropped: number;
+    /** The choice this ghost was planned for (so tools can tell when it has caught up). */
+    forChoice: string;
   } | null;
   /** Edit mode: the selected piece (its group), or null when adding to the end. */
   editSel: string | null;

@@ -108,7 +108,8 @@ test('edit mode: no dead buttons, select and change a piece in the middle, remov
       const sb = page.getByRole('group', { name: 'Slope' }).getByRole('button').nth(['Down', 'Level', 'Up'].indexOf(slope));
       if (await sb.isDisabled()) continue;
       await sb.click();
-      await page.waitForTimeout(250);
+      // Wait until the ghost has been planned for this exact choice (slow machines lag a frame or two).
+      await expect.poll(() => page.evaluate(() => { const s = (window as any).__cozy.store.getState(); return s.ghost?.forChoice === JSON.stringify(s.buildChoice); }), { timeout: 15_000 }).toBe(true);
       const end = await ghostEnd();
       expect(seen.has(end), `${dir} + ${slope} gives the same ghost as ${seen.get(end)}`).toBe(false);
       seen.set(end, `${dir} + ${slope}`);
