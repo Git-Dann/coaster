@@ -1,6 +1,6 @@
 import type { V3 } from '../core/vec3';
 import { autoBank } from './elements';
-import { separateCrossings } from './clearance';
+import { separateCrossings, worstGap } from './clearance';
 import type { TrackDesign, TrackNode } from './types';
 
 /**
@@ -118,13 +118,18 @@ export function returnNodes(design: TrackDesign, opt: ReturnOptions): TrackNode[
   // If the return can't be lifted clear of the player's track (say it would have to thread
   // through a loop), try wider paths and keep the first that is clear of everything.
   const radii = opt.radius ? [R] : [R, R * 1.5, R * 2.2, R * 0.7];
-  let fallback: TrackNode[] | null = null;
-  for (const r of radii) {
-    const { out, clear } = returnPath(design, opt, r);
-    if (clear) return out;
-    fallback ??= out;
-  }
-  return fallback!;
+  // Lining up further back from the station leaves room to climb over low track near the platform.
+  const brakes = opt.brakeLength ? [opt.brakeLength] : [26, 44, 64];
+  // If nothing is fully clear (a very busy layout), keep the route with the most room.
+  let best: { out: TrackNode[]; gap: number } | null = null;
+  for (const brakeLength of brakes)
+    for (const r of radii) {
+      const { out, clear } = returnPath(design, { ...opt, brakeLength }, r);
+      if (clear) return out;
+      const gap = worstGap({ ...design, nodes: [...design.nodes, ...out], closed: true });
+      if (!best || gap > best.gap) best = { out, gap };
+    }
+  return best!.out;
 }
 
 function returnPath(design: TrackDesign, opt: ReturnOptions, R: number): { out: TrackNode[]; clear: boolean } {
@@ -215,7 +220,7 @@ function returnPath(design: TrackDesign, opt: ReturnOptions, R: number): { out: 
   // The return must never pass through the player's track: lift it over (or under) crossings.
   // The final brake run into the station stays level.
   const temp: TrackDesign = { ...design, nodes: [...design.nodes.map((n) => ({ ...n, p: [...n.p] as V3, dir: [...n.dir] as V3 })), ...out], closed: true };
-  const clear = separateCrossings(temp, design.nodes.length, opt.groundAt, 2);
+  const clear = separateCrossings(temp, design.nodes.length, opt.groundAt, 2, true);
   // A trim brake halfway round keeps very fast layouts from arriving too quickly.
   const mid = out[Math.floor(out.length * 0.6)];
   if (mid && mid !== out[out.length - 1]) {

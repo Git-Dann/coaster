@@ -96,7 +96,8 @@ export function pathTo(start: { p: V3; dir: V3; bank: number }, target: Pose, op
   if (total < 0.5) return [];
   const y0 = start.p[1];
   const startPitch = Math.asin(Math.max(-1, Math.min(1, start.dir[1])));
-  const bankMag = (Math.abs(autoBank(90, R, opt.speed)) * Math.PI) / 180;
+  // Bank for the speed, but gently: never past 40°, and less on short arcs (a small joining bend).
+  const bankFor = (arc: number) => Math.min(0.7, (Math.abs(autoBank(90, R, opt.speed)) * Math.PI) / 180) * Math.min(1, arc / (Math.PI / 2));
   // Keep the bank on the same winding as the start (after rolls it can carry whole turns).
   const wind = Math.round(start.bank / (2 * Math.PI)) * 2 * Math.PI;
   const out: TrackNode[] = [];
@@ -129,8 +130,9 @@ export function pathTo(start: { p: V3; dir: V3; bank: number }, target: Pose, op
       const carry = Math.tan(startPitch) * total * (u - 2 * u * u + u * u * u);
       const y = y0 + (opt.y1 - y0) * ease + carry;
       // Bank into arcs, easing in and out at the ends of each arc.
+      // Smooth in and out: zero at each end of the arc, full in the middle.
       const f = (k + 1) / n;
-      const bank = sg.kind === 'S' ? 0 : (sg.kind === 'L' ? -1 : 1) * bankMag * Math.min(1, Math.sin(Math.PI * f) * 2.2);
+      const bank = sg.kind === 'S' ? 0 : (sg.kind === 'L' ? -1 : 1) * bankFor(sg.len / R) * Math.sin(Math.PI * Math.min(1, f));
       out.push({ id: `${idPrefix}${out.length}`, p: [x, y, z], dir: [Math.cos(h), 0, -Math.sin(h)], bank: wind + bank, kind: opt.kind ?? 'track', param: opt.param, group });
     }
   }

@@ -100,6 +100,9 @@ describe('edit mode builds on the grid', () => {
       expect(t.diagnostics.seamFlip, `trial ${trial}`).toBe(false);
       expect(worstClash(t), `trial ${trial}`).toBeGreaterThanOrEqual(MIN_VERTICAL - 0.6);
       for (let i = 0; i < t.count; i += 4) expect(t.pos[i * 3 + 1]! - ground(t.pos[i * 3]!, t.pos[i * 3 + 2]!), `trial ${trial}`).toBeGreaterThan(0.4);
+      let twist = 0;
+      for (let i = 1; i < t.count; i++) twist = Math.max(twist, Math.abs(t.bank[i]! - t.bank[i - 1]!) / t.ds);
+      expect(twist, `trial ${trial} twist rate`).toBeLessThan(0.7);
       const sim = new TrainSim(t, cfg(4), { ...DEFAULT_PHYSICS });
       sim.dispatch();
       for (let i = 0; i < 120 * 20; i++) {
@@ -109,6 +112,24 @@ describe('edit mode builds on the grid', () => {
       }
     }
   }, 90_000);
+
+  test('regression (playtest): every piece in turn, every special, then keyboard pieces: no clash, no twist', () => {
+    let d = starterPlayable(PAD_HEIGHT + 1);
+    const seq: Array<BuildChoice | 'rm'> = [];
+    for (const turn of [0, 1, -1] as const) for (const slope of [0, 1, -1] as const) seq.push({ kind: 'track', turn, slope });
+    for (const id of SPECIALS) seq.push({ kind: 'special', id });
+    seq.push({ kind: 'track', turn: 1, slope: 0 }, { kind: 'track', turn: 1, slope: 1 }, { kind: 'track', turn: -1, slope: 1 }, 'rm');
+    for (const c of seq) {
+      d = c === 'rm' ? removePiece(d) : planNext(d, c, ground).design;
+      for (const speed of [10, 16, 22]) {
+        const t = new BakedTrack(withReturn(d, { groundAt: ground, speed }));
+        expect(worstClash(t), `${JSON.stringify(c)} at speed ${speed}`).toBeGreaterThanOrEqual(MIN_VERTICAL - 0.6);
+        let twist = 0;
+        for (let i = 1; i < t.count; i++) twist = Math.max(twist, Math.abs(t.bank[i]! - t.bank[i - 1]!) / t.ds);
+        expect(twist, `${JSON.stringify(c)} twist`).toBeLessThan(0.7);
+      }
+    }
+  }, 120_000);
 
   test('the ghost knows when it is at the ground and when it passes under other track', () => {
     let d = starterPlayable(PAD_HEIGHT + 1);

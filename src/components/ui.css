@@ -1306,6 +1306,7 @@
   text-overflow: ellipsis;
 }
 .cc-add-btn {
+  white-space: nowrap;
   flex: 1;
   justify-content: center;
   max-width: 240px;
@@ -1333,5 +1334,45 @@
 @media (max-width: 380px) {
   .cc-seg button span {
     font-size: 0.66rem;
+  }
+  .cc-add-btn {
+    padding: 0 12px;
+  }
+  .cc-build-actions .cc-pill-btn {
+    padding: 0 10px;
+  }
+}
+/* Landscape phones: a compact construction panel so Remove and Add piece always fit on screen. */
+@media (max-height: 520px) and (orientation: landscape) {
+  .cc-tray {
+    padding: 8px 0;
+    gap: 6px;
+  }
+  .cc-seg button {
+    min-height: 42px;
+    font-size: 0.66rem;
+  }
+  .cc-seg button svg {
+    width: 20px;
+    height: 20px;
+  }
+  .cc-tray .cc-card.small {
+    width: 58px;
+    min-height: 54px;
+    gap: 2px;
+    padding: 4px 2px;
+  }
+  .cc-tray .cc-card.small svg {
+    width: 18px;
+    height: 18px;
+  }
+  .cc-build-hint {
+    font-size: 0.75rem;
+  }
+  .cc-add-btn {
+    min-height: 42px;
+  }
+  .cc-build-actions .cc-pill-btn {
+    min-height: 40px;
   }
 }
